@@ -100,3 +100,4 @@ celerybeat-schedule.*
 EM_main/settings.py
 run_com
 EMAIL_SETUP.md*
+*.env

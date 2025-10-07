@@ -141,50 +141,53 @@ def generate_shift_reports_for_date(target_date):
                 timestamp__range=(start_datetime, end_datetime)
             ).order_by('timestamp')
 
-            if shift_data.exists():
-                # Calculate metrics in Python to avoid SQLite JSON aggregation quirks
-                pf_values = list(shift_data.values_list('value__power_factor', flat=True))
-                if not pf_values:
+            entries = list(shift_data)
+            samples: list[tuple[DeviceData, dict]] = [
+                (entry, entry.value)
+                for entry in entries
+                if isinstance(entry.value, dict)
+            ]
+            if not samples:
+                continue
+
+            pf_samples: list[tuple[DeviceData, float]] = []
+            for entry, payload in samples:
+                try:
+                    pf_samples.append((entry, float(payload.get("power_factor"))))
+                except (TypeError, ValueError):
                     continue
+            if not pf_samples:
+                continue
 
-                min_pf = min(pf_values)
-                max_pf = max(pf_values)
-                avg_pf = sum(pf_values) / len(pf_values)
+            min_entry, min_pf = min(pf_samples, key=lambda pair: pair[1])
+            max_entry, max_pf = max(pf_samples, key=lambda pair: pair[1])
+            avg_pf = sum(pf for _, pf in pf_samples) / len(pf_samples)
 
-                # Get timestamps for min/max power factor
-                min_pf_record = (
-                    shift_data.filter(value__power_factor=min_pf)
-                    .order_by('timestamp')
-                    .first()
-                )
-                max_pf_record = (
-                    shift_data.filter(value__power_factor=max_pf)
-                    .order_by('timestamp')
-                    .first()
-                )
+            start_kwh = end_kwh = None
+            for _, payload in samples:
+                try:
+                    kwh_value = float(payload.get("kwh"))
+                except (TypeError, ValueError):
+                    continue
+                if start_kwh is None:
+                    start_kwh = kwh_value
+                end_kwh = kwh_value
+            total_kwh = 0.0
+            if start_kwh is not None and end_kwh is not None:
+                total_kwh = max(0.0, end_kwh - start_kwh)
 
-                # Calculate total kWh
-                first_reading = shift_data.first()
-                last_reading = shift_data.last()
-                total_kwh = 0
-                if first_reading and last_reading:
-                    start_kwh = first_reading.value.get('kwh', 0)
-                    end_kwh = last_reading.value.get('kwh', 0)
-                    total_kwh = max(0, end_kwh - start_kwh)
-
-                # Create shift report
-                ShiftReport.objects.create(
-                    shift=shift,
-                    device=device,
-                    date=target_date,
-                    min_power_factor=min_pf,
-                    max_power_factor=max_pf,
-                    min_power_factor_time=min_pf_record.timestamp if min_pf_record else start_datetime,
-                    max_power_factor_time=max_pf_record.timestamp if max_pf_record else start_datetime,
-                    avg_power_factor=avg_pf,
-                    total_kwh=total_kwh
-                )
-                generated_count += 1
+            ShiftReport.objects.create(
+                shift=shift,
+                device=device,
+                date=target_date,
+                min_power_factor=min_pf,
+                max_power_factor=max_pf,
+                min_power_factor_time=min_entry.timestamp,
+                max_power_factor_time=max_entry.timestamp,
+                avg_power_factor=avg_pf,
+                total_kwh=total_kwh,
+            )
+            generated_count += 1
 
     return generated_count
 

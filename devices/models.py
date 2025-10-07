@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 import requests
 import json
+from .fields import EncryptedJSONField
 
 class Shift(models.Model):
     name = models.CharField(max_length=50)  # e.g., "Morning Shift", "Night Shift"
@@ -285,7 +286,7 @@ class DeviceData(models.Model):
     Historical data from devices
     """
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='historical_data')
-    value = models.JSONField()
+    value = EncryptedJSONField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -294,6 +295,7 @@ class DeviceData(models.Model):
         indexes = [
             models.Index(fields=['device', '-timestamp']),
         ]
+     
 
     def __str__(self):
         return f"Data from {self.device} at {self.timestamp}"
