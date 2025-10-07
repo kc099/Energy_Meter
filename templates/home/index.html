@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+
+{% block title %}Edgesync - Home{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row align-items-center">
+        <div class="col-lg-6">
+            <h1 class="display-4 fw-bold text-primary mb-4">Welcome to Edgesync</h1>
+            <p class="lead mb-4">Monitor and manage your energy consumption in real-time with our advanced energy metering solution.</p>
+            
+            {% if user.is_authenticated %}
+                <div class="d-grid gap-2 d-md-flex">
+                    <a href="{% url 'dashboard' %}" class="btn btn-primary btn-lg px-4">Go to Dashboard</a>
+                    <a href="{% url 'devices:add_device' %}" class="btn btn-outline-primary btn-lg px-4">Add Device</a>
+                </div>
+            {% else %}
+                <div class="d-grid gap-2 d-md-flex">
+                    <a href="{% url 'login' %}" class="btn btn-primary btn-lg px-4">Login</a>
+                    <a href="{% url 'register' %}" class="btn btn-outline-primary btn-lg px-4">Register</a>
+                </div>
+            {% endif %}
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-lg border-0">
+                <div class="card-body p-4">
+                    <h3 class="h4 mb-4">Key Features</h3>
+                    <div class="d-flex align-items-start mb-3">
+                        <div class="feature-icon bg-primary bg-gradient text-white rounded-3 me-3 p-3">
+                            <i class="fas fa-tachometer-alt"></i>
+                        </div>
+                        <div>
+                            <h4 class="h5">Real-time Monitoring</h4>
+                            <p class="text-muted mb-0">Track your energy consumption in real-time with detailed analytics.</p>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-start mb-3">
+                        <div class="feature-icon bg-success bg-gradient text-white rounded-3 me-3 p-3">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div>
+                            <h4 class="h5">Usage Analytics</h4>
+                            <p class="text-muted mb-0">Get insights into your energy usage patterns and trends.</p>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-start">
+                        <div class="feature-icon bg-info bg-gradient text-white rounded-3 me-3 p-3">
+                            <i class="fas fa-mobile-alt"></i>
+                        </div>
+                        <div>
+                            <h4 class="h5">Remote Access</h4>
+                            <p class="text-muted mb-0">Monitor your devices from anywhere, at any time.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="bg-light py-5 mt-5">
+    <div class="container">
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h5 card-title">Smart Monitoring</h3>
+                        <p class="card-text">Automatically collect and analyze data from your energy meters.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h5 card-title">Easy Integration</h3>
+                        <p class="card-text">Quick and simple setup process for new devices.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h5 card-title">Secure Access</h3>
+                        <p class="card-text">Your data is protected with industry-standard security measures.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .feature-icon {
+        width: 48px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .feature-icon i {
+        font-size: 24px;
+    }
+</style>
+{% endblock %}

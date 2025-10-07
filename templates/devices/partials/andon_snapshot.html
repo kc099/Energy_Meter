@@ -1,0 +1,68 @@
+{% load static %}
+{% if andon_snapshot %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <div>
+      <h5 class="mb-0">{{ andon_snapshot.name }}</h5>
+      <small class="text-muted">Last ping: {{ andon_snapshot.last_updated|date:"Y-m-d H:i"|default:"—" }}</small>
+    </div>
+    <span class="badge {% if andon_snapshot.is_active %}bg-success{% else %}bg-danger{% endif %}">
+      {% if andon_snapshot.is_active %}Active{% else %}Offline{% endif %}
+    </span>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-sm-6 col-lg-3">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Plan</small>
+          <h4 class="mb-0 fw-bold">{{ andon_snapshot.plan|default:0 }}</h4>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Actual</small>
+          <h4 class="mb-0 fw-bold">{{ andon_snapshot.actual|default:0 }}</h4>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Downtime</small>
+          <h4 class="mb-0 fw-bold">{{ andon_snapshot.downtime_min|floatformat:1 }} mins</h4>
+        </div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-3">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Station IP</small>
+          <h4 class="mb-0 fw-bold">{{ andon_snapshot.ip|default:"—" }}</h4>
+        </div>
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-lg-6">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Fault Time</small>
+          <h5 class="mb-0">{{ andon_snapshot.fault_time|date:"Y-m-d H:i"|default:"—" }}</h5>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6">
+        <div class="p-3 rounded bg-light h-100">
+          <small class="text-muted d-block">Resolved Time</small>
+          <h5 class="mb-0">{{ andon_snapshot.resolved_time|date:"Y-m-d H:i"|default:"—" }}</h5>
+        </div>
+      </div>
+    </div>
+    {% if can_view_config %}
+    <div class="d-flex justify-content-end">
+      <button type="button" class="btn btn-outline-primary device-config-trigger" data-config-url="{{ config_url }}">
+        <i class="fas fa-tools me-1"></i> See Device Config
+      </button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="alert alert-warning mb-4">
+  <i class="fas fa-info-circle me-2"></i>
+  No matching Andon station was found for this device. Check that the device address matches the station IP.
+</div>
+{% endif %}

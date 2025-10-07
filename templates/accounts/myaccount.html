@@ -1,0 +1,464 @@
+{% extends 'base.html' %}
+{% block title %}Energy Meter - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <!-- OVERVIEW -->
+  <div class="col-12 col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-primary text-white">
+        <h5 class="card-title mb-0">Overview</h5>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <small class="text-muted d-block">Total Devices</small>
+          <h4 class="fw-bold mb-0">{{ device_totals.total }}</h4>
+        </div>
+        <div class="mb-3">
+          <small class="text-muted d-block">Active</small>
+          <h4 class="text-success fw-bold mb-0">{{ device_totals.active }}</h4>
+        </div>
+        <div>
+          <small class="text-muted d-block">Inactive</small>
+          <h4 class="text-danger fw-bold mb-0">{{ device_totals.inactive }}</h4>
+        </div>
+
+        <!-- actions -->
+        <div class="d-grid gap-2 mt-4">
+          <a href="{% url 'devices:add_device' %}" class="btn btn-success">
+            <i class="fas fa-plus me-2"></i>Add New Device
+          </a>
+          <a href="{% url 'devices:device_list' %}" class="btn btn-outline-primary">
+            <i class="fas fa-server me-2"></i>View All Devices
+          </a>
+
+          {% if owned_device_ids %}
+          <button type="button" class="btn btn-outline-secondary download-config-trigger">
+            <i class="fas fa-download me-2"></i>Download config details
+          </button>
+          {% else %}
+          <button type="button" class="btn btn-outline-secondary" disabled>
+            <i class="fas fa-download me-2"></i>Download config details
+          </button>
+          {% endif %}
+
+          <div class="dropdown">
+            <button class="btn btn-outline-danger dropdown-toggle {% if not owned_device_ids %}disabled{% endif %}"
+                    type="button" id="overviewDeleteDropdown" data-bs-toggle="dropdown"
+                    aria-expanded="false" {% if not owned_device_ids %}disabled{% endif %}>
+              Delete Device
+            </button>
+            {% if owned_device_ids %}
+            <ul class="dropdown-menu" aria-labelledby="overviewDeleteDropdown">
+              {% for device in devices %}
+                {% if device.id in owned_device_ids %}
+                <li>
+                  <button type="button"
+                          class="dropdown-item text-danger device-delete-trigger"
+                          data-delete-url="{% url 'devices:remove_device' device.id %}"
+                          data-device-label="{{ device.get_device_type_display|default:device.device_type }} at {{ device.located_at|default:'Unknown location' }}">
+                    {{ device.get_device_type_display|default:device.device_type }} – {{ device.located_at|default:'Unknown location' }}
+                  </button>
+                </li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RECENT DEVICES -->
+  <div class="col-12 col-lg-8">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-primary text-white">
+        <h5 class="card-title mb-0">Recent Devices</h5>
+      </div>
+      <div class="card-body">
+        {% if devices %}
+          <div class="list-group list-group-flush">
+            {% for device in devices %}
+              <div class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="me-3">
+                  <h6 class="mb-1">
+                    <a href="{% url 'devices:device_detail' device.id %}"
+                       class="text-decoration-none text-primary fw-semibold">
+                      {{ device.get_device_type_display|default:device.device_type }} at {{ device.located_at }}
+                    </a>
+                  </h6>
+                  {% if device.id not in owned_device_ids %}
+                  <span class="badge bg-dark me-2">Shared with you</span>
+                  {% if device.access_role_label %}
+                  <span class="badge bg-primary-subtle text-primary-emphasis me-2">{{ device.access_role_label }}</span>
+                  {% endif %}
+                  <small class="text-muted d-block">Owner: {{ device.device_owner.get_full_name|default:device.device_owner.username }}</small>
+                  {% endif %}
+                  {# keep IP hidden in list; show only in modal #}
+                  {% if device.last_updated %}
+                    <small class="text-muted">Updated {{ device.last_updated|timesince }} ago</small>
+                  {% else %}
+                    <small class="text-muted">Added {{ device.created_at|timesince }} ago</small>
+                  {% endif %}
+                </div>
+
+                <!-- status + SEE DEVICE CONFIG -->
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge rounded-pill {% if device.is_active %}bg-success{% else %}bg-danger{% endif %}">
+                    {% if device.is_active %}Active{% else %}Inactive{% endif %}
+                  </span>
+                  {% if device.id in config_access_ids %}
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary device-config-trigger"
+                    data-device-id="{{ device.id }}"
+                    data-config-url="{% url 'devices:device_config_detail' device.id %}"
+                  >
+                    device config
+                  </button>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="alert alert-info mb-0">
+            No devices yet. Use the buttons on the left to add your first device.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- hidden delete form -->
+<form id="device-delete-form" method="post" class="d-none">
+  {% csrf_token %}
+</form>
+
+<!-- hidden download form -->
+<form id="download-config-form" method="post" action="{% url 'devices:download_devices' %}" class="d-none">
+  {% csrf_token %}
+  <input type="hidden" name="password" id="download-password-field">
+  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+</form>
+
+<!-- DEVICE CONFIG MODAL -->
+<div class="modal fade" id="deviceConfigModal" tabindex="-1" aria-labelledby="deviceConfigLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deviceConfigLabel">Device Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Device</dt>       <dd class="col-sm-8" id="cfgDeviceName">-</dd>
+          <dt class="col-sm-4">Installed At</dt> <dd class="col-sm-8" id="cfgDeviceLocation">-</dd>
+          <dt class="col-sm-4">IP Address</dt>   <dd class="col-sm-8" id="cfgDeviceAddress">-</dd>
+          <dt class="col-sm-4">Status</dt>       <dd class="col-sm-8" id="cfgDeviceStatus">-</dd>
+          <dt class="col-sm-4">Added On</dt>     <dd class="col-sm-8" id="cfgDeviceCreated">-</dd>
+          <dt class="col-sm-4">Last Updated</dt> <dd class="col-sm-8" id="cfgDeviceUpdated">-</dd>
+        </dl>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button type="button" class="btn btn-outline-secondary" id="cfgDownload">Download</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PASSWORD CONFIRM MODAL -->
+<div class="modal fade" id="passwordConfirmModal" tabindex="-1" aria-labelledby="passwordConfirmLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="passwordConfirmLabel">Confirm Password</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3 text-muted password-context">Enter your password to continue.</p>
+        <div class="mb-3">
+          <label for="passwordConfirmInput" class="form-label">Account Password</label>
+          <input type="password" class="form-control" id="passwordConfirmInput" name="password" required autocomplete="current-password">
+        </div>
+        <div class="text-danger small password-error" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary password-submit-btn">Continue</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const deleteForm = document.getElementById('device-delete-form');
+  document.querySelectorAll('.device-delete-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const url = this.getAttribute('data-delete-url');
+      const label = this.getAttribute('data-device-label') || 'this device';
+      if (!url) {
+        return;
+      }
+      if (confirm('Are you sure you want to delete ' + label + '? This action cannot be undone.')) {
+        deleteForm.setAttribute('action', url);
+        deleteForm.submit();
+      }
+    });
+  });
+
+  const Modal = (typeof bootstrap !== 'undefined' && bootstrap.Modal) ? bootstrap.Modal : null;
+  if (!Modal) {
+    return;
+  }
+
+  const configModalEl = document.getElementById('deviceConfigModal');
+  const configModal = configModalEl ? new Modal(configModalEl) : null;
+  const passwordModalEl = document.getElementById('passwordConfirmModal');
+  const passwordModal = passwordModalEl ? new Modal(passwordModalEl) : null;
+
+  const downloadForm = document.getElementById('download-config-form');
+  const downloadPasswordField = document.getElementById('download-password-field');
+
+  const csrfInput = (downloadForm && downloadForm.querySelector('input[name="csrfmiddlewaretoken"]')) || (deleteForm && deleteForm.querySelector('input[name="csrfmiddlewaretoken"]'));
+  const csrfToken = csrfInput ? csrfInput.value : '';
+
+  const fields = {
+    name: document.getElementById('cfgDeviceName'),
+    loc: document.getElementById('cfgDeviceLocation'),
+    addr: document.getElementById('cfgDeviceAddress'),
+    status: document.getElementById('cfgDeviceStatus'),
+    created: document.getElementById('cfgDeviceCreated'),
+    updated: document.getElementById('cfgDeviceUpdated'),
+  };
+
+  const passwordForm = passwordModalEl ? passwordModalEl.querySelector('form') : null;
+  const passwordInput = passwordForm ? passwordForm.querySelector('input[name="password"]') : null;
+  const passwordError = passwordModalEl ? passwordModalEl.querySelector('.password-error') : null;
+  const passwordContext = passwordModalEl ? passwordModalEl.querySelector('.password-context') : null;
+  const passwordSubmitBtn = passwordForm ? passwordForm.querySelector('.password-submit-btn') : null;
+  if (passwordSubmitBtn && !passwordSubmitBtn.dataset.originalText) {
+    passwordSubmitBtn.dataset.originalText = passwordSubmitBtn.textContent;
+  }
+
+  let active = null;
+  let pendingAction = null;
+  let pendingConfigUrl = null;
+
+  function showPasswordError(message) {
+    if (passwordError) {
+      passwordError.textContent = message || '';
+    }
+  }
+
+  function resetPasswordSubmitButton() {
+    if (!passwordSubmitBtn) {
+      return;
+    }
+    passwordSubmitBtn.disabled = false;
+    passwordSubmitBtn.textContent = passwordSubmitBtn.dataset.originalText || 'Continue';
+  }
+
+  function setPasswordSubmitBusy() {
+    if (!passwordSubmitBtn) {
+      return;
+    }
+    passwordSubmitBtn.disabled = true;
+    passwordSubmitBtn.textContent = 'Verifying...';
+  }
+
+  function setFieldsFromPayload(device) {
+    if (!device || !fields.name) {
+      return;
+    }
+
+    active = {
+      id: device.id || '',
+      name: device.name || 'Device',
+      loc: device.location || 'N/A',
+      addr: device.address || 'N/A',
+      status: device.status || 'Unknown',
+      created: device.created || '-',
+      updated: device.updated || '-',
+    };
+
+    fields.name.textContent = active.name;
+    fields.loc.textContent = active.loc;
+    fields.addr.textContent = active.addr;
+    fields.status.textContent = active.status;
+    fields.created.textContent = active.created;
+    fields.updated.textContent = active.updated;
+
+    if (configModalEl) {
+      const title = configModalEl.querySelector('.modal-title');
+      if (title) {
+        title.textContent = active.name + ' Details';
+      }
+    }
+  }
+
+  function openPasswordModal(action, options) {
+    if (!passwordModal || !passwordForm) {
+      return;
+    }
+
+    pendingAction = action;
+    pendingConfigUrl = options && options.configUrl ? options.configUrl : null;
+
+    passwordForm.reset();
+    showPasswordError('');
+    resetPasswordSubmitButton();
+
+    if (passwordContext) {
+      passwordContext.textContent = action === 'config'
+        ? 'Enter your password to view this device configuration.'
+        : 'Enter your password to download device configuration details.';
+    }
+
+    passwordModal.show();
+  }
+
+  async function requestDeviceConfig(password) {
+    if (!pendingConfigUrl) {
+      throw new Error('No device selected.');
+    }
+
+    const response = await fetch(pendingConfigUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-CSRFToken': csrfToken,
+      },
+      body: new URLSearchParams({ password }),
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message = payload && payload.error ? payload.error : 'Unable to verify password.';
+      throw new Error(message);
+    }
+
+    if (!payload || !payload.device) {
+      throw new Error('No device data returned.');
+    }
+
+    return payload.device;
+  }
+
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      if (!passwordInput) {
+        return;
+      }
+
+      const password = passwordInput.value.trim();
+      if (!password) {
+        showPasswordError('Password is required.');
+        return;
+      }
+
+      setPasswordSubmitBusy();
+
+      try {
+        if (pendingAction === 'config') {
+          const device = await requestDeviceConfig(password);
+          setFieldsFromPayload(device);
+          passwordModal.hide();
+          if (configModal) {
+            configModal.show();
+          }
+        } else if (pendingAction === 'download') {
+          if (downloadPasswordField && downloadForm) {
+            downloadPasswordField.value = password;
+            passwordModal.hide();
+            downloadForm.submit();
+          }
+        }
+      } catch (error) {
+        showPasswordError(error.message || 'Unable to verify password.');
+      } finally {
+        resetPasswordSubmitButton();
+      }
+    });
+  }
+
+  if (passwordModalEl) {
+    passwordModalEl.addEventListener('shown.bs.modal', function () {
+      if (passwordInput) {
+        passwordInput.focus();
+      }
+    });
+
+    passwordModalEl.addEventListener('hidden.bs.modal', function () {
+      if (passwordForm) {
+        passwordForm.reset();
+      }
+      showPasswordError('');
+      resetPasswordSubmitButton();
+      pendingAction = null;
+      pendingConfigUrl = null;
+    });
+  }
+
+  document.querySelectorAll('.device-config-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      openPasswordModal('config', { configUrl: this.dataset.configUrl || null });
+    });
+  });
+
+  document.querySelectorAll('.download-config-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      openPasswordModal('download');
+    });
+  });
+
+  const dlBtn = document.getElementById('cfgDownload');
+  if (dlBtn) {
+    dlBtn.addEventListener('click', function () {
+      if (!active) {
+        return;
+      }
+
+      const rows = [
+        ['Device', active.name],
+        ['Installed At', active.loc],
+        ['IP Address', active.addr],
+        ['Status', active.status],
+        ['Added On', active.created],
+        ['Last Updated', active.updated],
+      ];
+      const lines = [['Field', 'Value'].join(',')];
+      rows.forEach(function (row) {
+        const escaped = row.map(function (value) {
+          const cell = String(value ?? '').replace(/"/g, '""');
+          return /[,\n]/.test(cell) ? '"' + cell + '"' : cell;
+        });
+        lines.push(escaped.join(','));
+      });
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'device-' + (active.id || 'details') + '.csv';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    });
+  }
+});
+</script>
+{% endblock %}

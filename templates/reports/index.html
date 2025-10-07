@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+
+{% block title %}Reports - Energy Meter{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12">
+        <form class="report-grid" method="get" action="{% url 'reports' %}">
+            <input type="hidden" name="page" value="{{ form_values.page|default:'1' }}">
+            <div class="report-grid__item report-grid__item--wide">
+                <div class="card shadow-sm border-0 report-box h-100">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold" for="dataset-select">Select data set</label>
+                        <select id="dataset-select" name="dataset" class="form-select" required>
+                            <option value="" {% if not form_values.dataset %}selected{% endif %}>Select a data set</option>
+                            <option value="readings" {% if form_values.dataset == 'readings' %}selected{% endif %}>Meter Readings</option>
+                            <option value="minmax" {% if form_values.dataset == 'minmax' %}selected{% endif %}>
+                                Min/Max Summary{% if minmax_stats.overall_min is not None %} ({{ minmax_stats.overall_min|floatformat:2 }} / {{ minmax_stats.overall_max|floatformat:2 }}){% endif %}
+                            </option>
+                        </select>
+                        <small class="text-muted d-block mt-2">Meter Readings returns raw logs. Min/Max Summary aggregates every station into a single shift-by-shift view.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-grid__item">
+                <div class="card shadow-sm border-0 report-box h-100">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold" for="format-select">Export format</label>
+                        <select id="format-select" name="format" class="form-select" required>
+                            <option value="csv" {% if form_values.export_format == 'csv' %}selected{% endif %}>CSV</option>
+                            <option value="pdf" {% if form_values.export_format == 'pdf' %}selected{% endif %}>PDF</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-grid__item">
+                <div class="card shadow-sm border-0 report-box h-100">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold" for="sort-select">Sort by</label>
+                        <select id="sort-select" name="sort" class="form-select">
+                            {% for sort_value, sort_label in sort_choices %}
+                                <option value="{{ sort_value }}" {% if form_values.sort == sort_value %}selected{% endif %}>{{ sort_label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-grid__item">
+                <div class="card shadow-sm border-0 report-box h-100">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold" for="from-date">From date</label>
+                        <input id="from-date" name="from" type="date" class="form-control" value="{{ form_values.from_date }}" required>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-grid__item">
+                <div class="card shadow-sm border-0 report-box h-100">
+                    <div class="card-body">
+                        <label class="form-label fw-semibold" for="to-date">To date</label>
+                        <input id="to-date" name="to" type="date" class="form-control" value="{{ form_values.to_date }}" required>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-grid__item report-grid__item--actions">
+                <div class="d-flex flex-column flex-md-row gap-2">
+                    <button type="submit" name="action" value="preview" class="btn btn-outline-primary">Preview</button>
+                    <button type="submit" name="action" value="download" class="btn btn-primary">Download</button>
+                </div>
+                <small class="text-muted">Preview shows 10 rows per page; use Previous/Next to browse. Download includes the full data set.</small>
+            </div>
+        </form>
+
+        {% if preview_data %}
+        <div class="card shadow-sm border-0 report-box mt-4">
+            <div class="card-body">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
+                    <h5 class="mb-2 mb-md-0">{{ preview_data.title }}</h5>
+                    {% if preview_data.total_rows %}
+                        <small class="text-muted">Showing {{ preview_data.start_row }}-{{ preview_data.end_row }} of {{ preview_data.total_rows }} rows{% if preview_data.total_pages > 1 %} (page {{ preview_data.page }} of {{ preview_data.total_pages }}){% endif %}</small>
+                    {% endif %}
+                </div>
+
+                {% if preview_data.rows %}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    {% for header in preview_data.headers %}
+                                        <th scope="col">{{ header }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in preview_data.rows %}
+                                    <tr>
+                                        {% for value in row %}
+                                            <td>{{ value }}</td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if preview_data.has_prev or preview_data.has_next %}
+                    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mt-3 gap-2">
+                        <small class="text-muted mb-0">Page {{ preview_data.page }} of {{ preview_data.total_pages }}</small>
+                        <div class="d-flex gap-2">
+                            {% if preview_data.has_prev %}
+                            <form method="get" action="{% url 'reports' %}" class="d-inline m-0">
+                                <input type="hidden" name="dataset" value="{{ form_values.dataset }}">
+                                <input type="hidden" name="format" value="{{ form_values.export_format }}">
+                                <input type="hidden" name="sort" value="{{ form_values.sort }}">
+                                <input type="hidden" name="from" value="{{ form_values.from_date }}">
+                                <input type="hidden" name="to" value="{{ form_values.to_date }}">
+                                <input type="hidden" name="page" value="{{ preview_data.prev_page }}">
+                                <input type="hidden" name="action" value="preview">
+                                <button type="submit" class="btn btn-outline-secondary btn-sm">Previous</button>
+                            </form>
+                            {% endif %}
+                            {% if preview_data.has_next %}
+                            <form method="get" action="{% url 'reports' %}" class="d-inline m-0">
+                                <input type="hidden" name="dataset" value="{{ form_values.dataset }}">
+                                <input type="hidden" name="format" value="{{ form_values.export_format }}">
+                                <input type="hidden" name="sort" value="{{ form_values.sort }}">
+                                <input type="hidden" name="from" value="{{ form_values.from_date }}">
+                                <input type="hidden" name="to" value="{{ form_values.to_date }}">
+                                <input type="hidden" name="page" value="{{ preview_data.next_page }}">
+                                <input type="hidden" name="action" value="preview">
+                                <button type="submit" class="btn btn-outline-secondary btn-sm">Next</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <p class="mb-0 text-muted">No data available for the selected filters.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .report-grid {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        align-items: stretch;
+    }
+    .report-grid__item .card {
+        height: 100%;
+    }
+    .report-grid__item--actions {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+    .report-grid__item--actions .btn {
+        min-height: 2.5rem;
+    }
+    @media (min-width: 1200px) {
+        .report-grid {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+        .report-grid__item--wide {
+            grid-column: span 2;
+        }
+    }
+    .report-box .card-body {
+        padding: 1.25rem;
+    }
+</style>
+{% endblock %}

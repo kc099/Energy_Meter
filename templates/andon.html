@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Andon Dashboard{% endblock %}
+
+{% block content %}
+<style>
+  .card-station{background:#f0f8ff}
+  .tile-plan{background:#2c3e50;color:#fff}
+  .tile-actual{background:#478778;color:#fff}
+  .tile-downtime{background:#f39c12;color:#fff}
+  .tile-fault{background:#9b59b6;color:#fff}
+  .tile-resolved{background:#1abc9c;color:#fff}
+  .tile h6{font-weight:700;margin:0;opacity:.95}
+  .tile .value{font-weight:800;font-size:2.25rem;line-height:1.1}
+  @media (min-width:1600px){.tile .value{font-size:3rem}}
+  .header-brand img{height:72px}
+  @media (min-width:1400px){.header-brand img{height:96px}}
+  .station-header{background:#2c3e50;color:#fff}
+  .station-header h4{margin:0;font-weight:700}
+  .slide-btn{background:#3498db;color:#fff;border:none;font-weight:700}
+</style>
+
+<!-- Header with logos + clock -->
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body d-flex align-items-center justify-content-between">
+    <div class="header-brand d-flex align-items-center gap-3">
+      <img src="{{ left_logo_url }}" alt="Left Logo">
+      <img src="{{ right_logo_url }}" alt="Right Logo">
+    </div>
+    <h2 class="mb-0 text-primary fw-bold">Andon Dashboard</h2>
+    <div class="text-end">
+      <div id="nowDate" class="fs-5 text-muted"></div>
+      <div id="nowTime" class="fs-3 fw-bold"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Station card with ◀ ▶ -->
+<div id="andon-root" class="card card-station border-0 shadow-sm">
+  <div class="card-header station-header">
+    <div class="d-flex align-items-center justify-content-between">
+      <button class="btn slide-btn" id="prevBtn" aria-label="Previous">◀</button>
+      <div class="text-center flex-grow-1">
+        <h4 class="mb-1" id="stName">—</h4>
+        <div class="small"><span class="opacity-75">Updated </span><span id="stUpdated">—</span></div>
+      </div>
+      <button class="btn slide-btn" id="nextBtn" aria-label="Next">▶</button>
+    </div>
+  </div>
+
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-lg-4">
+        <div class="tile tile-plan rounded p-3 h-100 text-center">
+          <h6>Plan Count</h6>
+          <div class="value" id="valPlan">0</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-4">
+        <div class="tile tile-actual rounded p-3 h-100 text-center">
+          <h6>Actual Count</h6>
+          <div class="value" id="valActual">0</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-4">
+        <div class="tile tile-downtime rounded p-3 h-100 text-center">
+          <h6>Total Downtime</h6>
+          <div class="value" id="valDowntime">0 mins</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-lg-6">
+        <div class="tile tile-fault rounded p-3 h-100 text-center">
+          <h6>Fault Time</h6>
+          <div class="value" id="valFault">—</div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6">
+        <div class="tile tile-resolved rounded p-3 h-100 text-center">
+          <h6>Resolved Time</h6>
+          <div class="value" id="valResolved">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3 d-flex justify-content-end">
+      <button class="btn btn-outline-primary" id="seeConfigBtn">See device config</button>
+    </div>
+  </div>
+</div>
+
+<!-- Config modal -->
+<div class="modal fade" id="cfgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Station Details</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <dl class="row mb-0">
+        <dt class="col-sm-4">Station</dt><dd class="col-sm-8" id="cfgName">-</dd>
+        <dt class="col-sm-4">IP Address</dt><dd class="col-sm-8" id="cfgIp">-</dd>
+        <dt class="col-sm-4">Added On</dt><dd class="col-sm-8" id="cfgCreated">-</dd>
+        <dt class="col-sm-4">Last Updated</dt><dd class="col-sm-8" id="cfgUpdated">-</dd>
+      </dl>
+    </div>
+    <div class="modal-footer justify-content-between">
+      <button class="btn btn-outline-secondary" id="cfgDownload">Download</button>
+      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+  // live clock
+  function tick(){
+    const now = new Date();
+    document.getElementById('nowDate').textContent = now.toLocaleDateString();
+    document.getElementById('nowTime').textContent = now.toLocaleTimeString();
+  }
+  tick(); setInterval(tick, 1000);
+
+  // stations is passed from the view; ensure it's JSON-safe there if needed
+  const stations = {{ stations|safe }};
+  let idx = 0;
+
+  const el = (id)=>document.getElementById(id);
+  const modalEl = document.getElementById('cfgModal');
+  const cfgModal = (window.bootstrap && modalEl) ? new bootstrap.Modal(modalEl) : null;
+
+  function fmtDate(s){
+    if(!s) return '—';
+    try { return new Date(s).toLocaleString(); } catch(e){ return s; }
+  }
+  function fill(){
+    if(!stations.length) return;
+    const st = stations[idx];
+    el('stName').textContent = st.name;
+    el('stUpdated').textContent = fmtDate(st.last_updated);
+    el('valPlan').textContent = st.plan ?? 0;
+    el('valActual').textContent = st.actual ?? 0;
+    el('valDowntime').textContent = (st.downtime_min ?? 0).toFixed(1) + ' mins';
+    el('valFault').textContent = st.fault_time || '—';
+    el('valResolved').textContent = st.resolved_time || '—';
+    el('cfgName').textContent = st.name;
+    el('cfgIp').textContent = st.ip || '—';
+    el('cfgCreated').textContent = fmtDate(st.created_at);
+    el('cfgUpdated').textContent = fmtDate(st.last_updated);
+  }
+
+  document.getElementById('prevBtn').addEventListener('click', ()=>{ if(!stations.length) return; idx=(idx-1+stations.length)%stations.length; fill(); });
+  document.getElementById('nextBtn').addEventListener('click', ()=>{ if(!stations.length) return; idx=(idx+1)%stations.length; fill(); });
+  document.getElementById('seeConfigBtn').addEventListener('click', ()=>{ if(cfgModal) cfgModal.show(); });
+
+  document.getElementById('cfgDownload').addEventListener('click', ()=>{
+    if(!stations.length) return;
+    const st = stations[idx];
+    const rows = [
+      ['Field','Value'],
+      ['Station', st.name || ''],
+      ['IP', st.ip || ''],
+      ['Added On', fmtDate(st.created_at)],
+      ['Last Updated', fmtDate(st.last_updated)],
+    ];
+    const csv = [rows.map(r=>r.map(v=>String(v??'').replace(/"/g,'""'))
+                      .map(c=>/[,\n]/.test(c)?`"${c}"`:c).join(',')).join('\n')];
+    const blob = new Blob(csv, {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href = url; a.download = `station-${st.id}.csv`; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  });
+
+  fill();
+})();
+</script>
+{% endblock %}

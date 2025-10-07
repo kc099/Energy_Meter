@@ -1,0 +1,190 @@
+{% extends 'base.html' %}
+
+{% block title %}Manage Shifts - Energy Meter{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Manage Shifts</h5>
+                    <button type="button" class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addShiftModal">
+                        <i class="fas fa-plus"></i> Add New Shift
+                    </button>
+                </div>
+                <div class="card-body">
+                    {% if shifts %}
+                        <div class="row g-3">
+                            {% for shift in shifts %}
+                            <div class="col-12 col-md-6 col-lg-4">
+                                <div class="border rounded p-3 h-100 d-flex flex-column justify-content-between shadow-sm">
+                                    <div>
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <h6 class="mb-1 fw-semibold">{{ shift.name }}</h6>
+                                                <small class="text-muted">{{ shift.start_time|time:"H:i" }} — {{ shift.end_time|time:"H:i" }}</small>
+                                            </div>
+                                            <span class="badge {% if shift.is_active %}bg-success{% else %}bg-secondary{% endif %}">
+                                                {{ shift.is_active|yesno:"Active,Inactive" }}
+                                            </span>
+                                        </div>
+                                        <div class="small text-muted">
+                                            {% if shift.start_time > shift.end_time %}
+                                                <i class="fas fa-moon me-1"></i>Crosses midnight
+                                            {% else %}
+                                                <i class="fas fa-sun me-1"></i>Same-day shift
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button class="btn btn-outline-primary btn-sm flex-grow-1 edit-shift"
+                                                data-shift-id="{{ shift.id }}"
+                                                data-shift-name="{{ shift.name }}"
+                                                data-start-time="{{ shift.start_time|time:'H:i' }}"
+                                                data-end-time="{{ shift.end_time|time:'H:i' }}"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#editShiftModal">
+                                            <i class="fas fa-edit me-1"></i>Edit Times
+                                        </button>
+                                        <button class="btn btn-outline-{% if shift.is_active %}danger{% else %}success{% endif %} btn-sm toggle-status"
+                                                data-shift-id="{{ shift.id }}">
+                                            <i class="fas {% if shift.is_active %}fa-pause{% else %}fa-play{% endif %} me-1"></i>
+                                            {% if shift.is_active %}Deactivate{% else %}Activate{% endif %}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <p class="text-muted mb-0">No shifts defined yet. Click "Add New Shift" to create one.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Shift Modal -->
+<div class="modal fade" id="addShiftModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'devices:add_shift' %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Shift</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Shift Name</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Start Time</label>
+                                <input type="time" name="start_time" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">End Time</label>
+                                <input type="time" name="end_time" class="form-control" required>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Shift</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Shift Modal -->
+<div class="modal fade" id="editShiftModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'devices:edit_shift' 0 %}" id="editShiftForm" data-action-template="{% url 'devices:edit_shift' 0 %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Shift</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Shift Name</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Start Time</label>
+                                <input type="time" name="start_time" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">End Time</label>
+                                <input type="time" name="end_time" class="form-control" required>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle edit shift modal
+    const editForm = document.getElementById('editShiftForm');
+    const editActionTemplate = editForm ? editForm.dataset.actionTemplate : '';
+
+    document.querySelectorAll('.edit-shift').forEach(button => {
+        button.addEventListener('click', () => {
+            if (!editForm || !editActionTemplate) {
+                return;
+            }
+
+            const { shiftId, shiftName, startTime, endTime } = button.dataset;
+            editForm.action = editActionTemplate.replace('0', shiftId);
+            editForm.querySelector('input[name="name"]').value = shiftName;
+            editForm.querySelector('input[name="start_time"]').value = startTime;
+            editForm.querySelector('input[name="end_time"]').value = endTime;
+        });
+    });
+
+    // Handle toggle status
+    const toggleButtons = document.querySelectorAll('.toggle-status');
+    toggleButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const shiftId = this.dataset.shiftId;
+            fetch(`{% url 'devices:toggle_shift' 0 %}`.replace('0', shiftId), {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                },
+            }).then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                }
+            });
+        });
+    });
+});
+</script>
+{% endblock %}

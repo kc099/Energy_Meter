@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+
+{% block title %}Share {{ device }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Share Device: {{ device }}</h5>
+                    <a href="{% url 'devices:device_detail' device.id %}" class="btn btn-sm btn-light">
+                        <i class="fas fa-arrow-left me-1"></i>Back to Device
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Add User Form -->
+                <div class="mb-4">
+                    <h6>Add User to Share With</h6>
+                    <form method="post" class="row g-2 align-items-end">
+                        {% csrf_token %}
+                        <div class="col-md-6">
+                            <label for="share-identifier" class="form-label">Email or Username</label>
+                            <input type="text" id="share-identifier" name="identifier" class="form-control" placeholder="example@company.com or username" list="share-device-suggestions" required>
+                            <div class="form-text">The user must already exist. Suggestions include active users you haven't shared with.</div>
+                            <datalist id="share-device-suggestions">
+                                {% for user in available_users %}
+                                    {% if user.email %}
+                                    <option value="{{ user.email }}">{{ user.username }}{% if user.first_name or user.last_name %} - {{ user.first_name }} {{ user.last_name }}{% endif %}</option>
+                                    {% endif %}
+                                    <option value="{{ user.username }}">{{ user.username }}{% if user.first_name or user.last_name %} - {{ user.first_name }} {{ user.last_name }}{% endif %}</option>
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="share-role" class="form-label">Access Level</label>
+                            <select id="share-role" name="role" class="form-select">
+                                {% for option in role_choices %}
+                                <option value="{{ option.value }}" data-description="{{ option.description }}" {% if option.value == selected_role %}selected{% endif %}>
+                                    {{ option.label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text" id="share-role-description">
+                                {% for option in role_choices %}
+                                    {% if option.value == selected_role %}
+                                        {{ option.description }}
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <button type="submit" class="btn btn-success w-100">
+                                <i class="fas fa-share me-1"></i>Share
+                            </button>
+                        </div>
+                    </form>
+                    <div class="alert alert-info py-2 px-3 small mt-3">
+                        {% for option in role_choices %}
+                            <strong>{{ option.label }}:</strong> {{ option.description }}{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Shared Users List -->
+                <div>
+                    <h6>Shared With Users</h6>
+                    {% if shared_entries %}
+                        <div class="list-group">
+                            {% for share in shared_entries %}
+                                <div class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>{{ share.user.username }}</strong>
+                                        <span class="badge text-bg-light ms-2">{{ share.get_role_display }}</span>
+                                        <div class="text-muted small">{{ share.description }}</div>
+                                    </div>
+                                    <form method="post" action="{% url 'devices:remove_shared_user' device.id share.user.id %}" class="m-0">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Remove {{ share.user.username }} from this device?')">
+                                            <i class="fas fa-times me-1"></i>Remove Access
+                                        </button>
+                                    </form>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No users have been shared with this device yet.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const roleSelect = document.getElementById('share-role');
+    const roleHelp = document.getElementById('share-role-description');
+    if (!roleSelect || !roleHelp) {
+        return;
+    }
+    const updateRoleHelp = () => {
+        const option = roleSelect.selectedOptions[0];
+        roleHelp.textContent = option ? (option.getAttribute('data-description') || '') : '';
+    };
+    updateRoleHelp();
+    roleSelect.addEventListener('change', updateRoleHelp);
+});
+</script>
+{% endblock %}

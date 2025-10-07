@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% load widget_tweaks %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0">Add New Device</h3>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger">
+                                {{ form.non_field_errors }}
+                            </div>
+                        {% endif %}
+                        
+                        <div class="mb-3">
+                            <label for="{{ form.device_type.id_for_label }}" class="form-label">Device Type</label>
+                            {% if form.device_type.errors %}
+                                <div class="alert alert-danger">{{ form.device_type.errors }}</div>
+                            {% endif %}
+                            {% render_field form.device_type class="form-control" %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.located_at.id_for_label }}" class="form-label">Location</label>
+                            {% if form.located_at.errors %}
+                                <div class="alert alert-danger">{{ form.located_at.errors }}</div>
+                            {% endif %}
+                            {% render_field form.located_at class="form-control" placeholder="e.g., Station 1, Inspection Site" %}
+                        </div>
+
+                        <div class="mb-4" id="address-type-group">
+                            <label class="form-label">Address Type</label>
+                            {% if form.address_type.errors %}
+                                <div class="alert alert-danger">{{ form.address_type.errors }}</div>
+                            {% endif %}
+                            <div class="btn-group w-100" role="group">
+                                {% for value, text in form.address_type.field.choices %}
+                                    <input type="radio" class="btn-check" name="{{ form.address_type.name }}" 
+                                           id="address_type_{{ value }}" value="{{ value }}" 
+                                           {% if form.address_type.value == value %}checked{% endif %}>
+                                    <label class="btn btn-outline-primary" for="address_type_{{ value }}">{{ text }}</label>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.device_address.id_for_label }}" class="form-label" id="address_label">Device Address</label>
+                            {% if form.device_address.errors %}
+                                <div class="alert alert-danger">{{ form.device_address.errors }}</div>
+                            {% endif %}
+                            {% render_field form.device_address class="form-control" %}
+                            {% if form.device_address.help_text %}
+                                <div class="form-text text-muted" id="address_help">{{ form.device_address.help_text }}</div>
+                            {% endif %}
+                        </div>
+
+                            <script>
+                            // Update the form based on address type selection
+                            const addressInput = document.getElementById('{{ form.device_address.id_for_label }}');
+                            const helpText = document.getElementById('address_help');
+                            const label = document.getElementById('address_label');
+                            const addressTypeGroup = document.getElementById('address-type-group');
+                            const deviceTypeSelect = document.getElementById('{{ form.device_type.id_for_label }}');
+
+                            function updateAddressFields(addrType) {
+                                if (addrType === 'ip') {
+                                    addressInput.placeholder = '192.168.0.124 or 192.168.0.124:8000';
+                                    label.textContent = 'Device IP Address (with optional port)';
+                                } else {
+                                    addressInput.placeholder = '192.168.0.193:8000/api/device/1/getdata/';
+                                    label.textContent = 'API Endpoint URL';
+                                }
+                            }
+
+                            function enforceAndonMode() {
+                                const isAndon = deviceTypeSelect && deviceTypeSelect.value === 'andon';
+                                addressTypeGroup.classList.toggle('d-none', isAndon);
+                                if (isAndon) {
+                                    const ipRadio = document.querySelector('input[name="{{ form.address_type.name }}"][value="ip"]');
+                                    if (ipRadio && !ipRadio.checked) {
+                                        ipRadio.checked = true;
+                                        updateAddressFields('ip');
+                                    }
+                                    label.textContent = 'Station IP Address';
+                                    addressInput.placeholder = '192.168.0.124';
+                                } else {
+                                    const checked = document.querySelector('input[name="{{ form.address_type.name }}"]:checked');
+                                    updateAddressFields(checked ? checked.value : 'ip');
+                                }
+                            }
+
+                            document.querySelectorAll('input[name="{{ form.address_type.name }}"]').forEach(radio => {
+                                radio.addEventListener('change', function() {
+                                    updateAddressFields(this.value);
+                                    addressInput.value = '';
+                                });
+                            });
+
+                            if (deviceTypeSelect) {
+                                deviceTypeSelect.addEventListener('change', enforceAndonMode);
+                                enforceAndonMode();
+                            }
+
+                            const checked = document.querySelector('input[name="{{ form.address_type.name }}"]:checked');
+                            updateAddressFields(checked ? checked.value : 'ip');
+                        </script>
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary">Add Device</button>
+                            <a href="{% url 'devices:device_list' %}" class="btn btn-secondary">Cancel</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .card {
+        border: none;
+        border-radius: 10px;
+    }
+    .card-header {
+        border-radius: 10px 10px 0 0 !important;
+    }
+    .form-control {
+        border-radius: 5px;
+        border: 1px solid #ced4da;
+        padding: 10px;
+    }
+    .form-control:focus {
+        border-color: #80bdff;
+        box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+    }
+</style>
+{% endblock %}

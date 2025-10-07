@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block title %}Shift Reports - Energy Meter{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Shift Reports</h5>
+                    <div class="d-flex gap-2">
+                        <form class="d-flex align-items-center" method="get">
+                            <input type="date" name="date" class="form-control me-2" value="{{ selected_date|default:'' }}">
+                            <button type="submit" class="btn btn-light">
+                                <i class="fas fa-filter"></i> Filter
+                            </button>
+                        </form>
+                        <form class="d-flex align-items-center" method="post">
+                            {% csrf_token %}
+                            <input type="date" name="generate_date" class="form-control me-2" required>
+                            <button type="submit" name="generate_reports" class="btn btn-success">
+                                <i class="fas fa-plus"></i> Generate Reports
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if reports %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Device</th>
+                                        <th>Shift</th>
+                                        <th>Time Range</th>
+                                        <th>Energy Consumption</th>
+                                        <th>Min Power Factor</th>
+                                        <th>Min PF Time</th>
+                                        <th>Max Power Factor</th>
+                                        <th>Max PF Time</th>
+                                        <th>Average Power Factor</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for report in reports %}
+                                        <tr>
+                                            <td>{{ report.date|date:"Y-m-d" }}</td>
+                                            <td>{{ report.device.device_type }} - {{ report.device.located_at }}</td>
+                                            <td>{{ report.shift.name }}</td>
+                                            <td>{{ report.shift.start_time|time:"H:i" }} - {{ report.shift.end_time|time:"H:i" }}</td>
+                                            <td>{{ report.total_kwh|floatformat:2 }} kWh</td>
+                                            <td>{{ report.min_power_factor|floatformat:3 }}</td>
+                                            <td>{{ report.min_power_factor_time|date:"H:i:s" }}</td>
+                                            <td>{{ report.max_power_factor|floatformat:3 }}</td>
+                                            <td>{{ report.max_power_factor_time|date:"H:i:s" }}</td>
+                                            <td>{{ report.avg_power_factor|floatformat:3 }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-4">
+                            <p class="text-muted mb-0">No shift reports available{% if selected_date %} for the selected date{% endif %}.</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .table th {
+        background-color: #f8f9fa;
+    }
+</style>
+{% endblock %}

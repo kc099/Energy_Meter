@@ -1,0 +1,830 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Device Details - {{ device.device_type }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+    .chart-container {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+        padding: 15px;
+        height: 300px;
+    }
+    .readings-card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    .reading-item {
+        padding: 15px;
+        border-bottom: 1px solid #eee;
+    }
+    .reading-item:last-child {
+        border-bottom: none;
+    }
+    /* Sharing section styles */
+    .sharing-card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+    }
+    .share-header {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1rem;
+    }
+    .share-help {
+        background: #fff7e6;
+        border-radius: 6px;
+        padding: 12px 16px;
+        font-size: 0.9rem;
+    }
+    .shared-user-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+    }
+    .shared-user-chip {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #f8f9fa;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 12px 14px;
+        gap: 0.75rem;
+    }
+    .shared-user-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+    }
+    .shared-user-meta small {
+        color: #6c757d;
+        font-size: 0.85rem;
+    }
+    .share-empty {
+        background: #f1f5f9;
+        border-radius: 6px;
+        padding: 16px;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        color: #475569;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center">
+            {% if prev_device %}
+            <a href="{% url 'devices:device_detail' prev_device.id %}" class="btn btn-outline-primary me-3">
+                <i class="fas fa-chevron-left"></i>
+            </a>
+            {% endif %}
+            <h2 class="mb-0">{{ device.device_type }} at {{ device.located_at }}</h2>
+            {% if next_device %}
+            <a href="{% url 'devices:device_detail' next_device.id %}" class="btn btn-outline-primary ms-3">
+                <i class="fas fa-chevron-right"></i>
+            </a>
+            {% endif %}
+        </div>
+        <div class="btn-group">
+            <a href="{% url 'devices:device_list' %}" class="btn btn-outline-primary">
+                <i class="fas fa-th-list"></i> All Devices
+            </a>
+            {% if can_manage_device %}
+            <a href="?poll=true" class="btn btn-outline-success">
+                <i class="fas fa-sync"></i> Refresh Data
+            </a>
+            <a href="{% url 'devices:remove_device' device.id %}" class="btn btn-outline-danger">
+                <i class="fas fa-trash"></i> Remove Device
+            </a>
+            {% elif can_view_config %}
+            <span class="btn btn-outline-info disabled" aria-disabled="true">
+                <i class="fas fa-tools"></i> Configuration Access
+            </span>
+            {% else %}
+            <span class="btn btn-outline-secondary disabled" aria-disabled="true">
+                <i class="fas fa-eye"></i> Data Viewer Access
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if messages %}
+    <div class="mb-4">
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not is_owner %}
+        {% if access_role == 'manager' %}
+        <div class="alert alert-success d-flex align-items-center gap-2">
+            <i class="fas fa-user-cog"></i>
+            <div>You have manager access on this device. All actions, including configuration and removal, are available.</div>
+        </div>
+        {% elif access_role == 'inspector' %}
+        <div class="alert alert-info d-flex align-items-center gap-2">
+            <i class="fas fa-tools"></i>
+            <div>You can view device configuration and data, but management actions remain restricted to the owner.</div>
+        </div>
+        {% else %}
+        <div class="alert alert-warning d-flex align-items-center gap-2">
+            <i class="fas fa-user-shield"></i>
+            <div>You can view live data and history. Request elevated access from {{ device.device_owner.get_full_name|default:device.device_owner.username }} for configuration details.</div>
+        </div>
+        {% endif %}
+    {% endif %}
+
+    {% if is_owner %}
+    <div class="sharing-card mb-4">
+        <div class="card-header bg-warning text-dark">
+            <div class="share-header">
+                <h5 class="mb-0"><i class="fas fa-share-alt me-2"></i>Device Sharing</h5>
+                <span class="badge bg-dark text-white">Owner view</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <h6 class="mb-3">Currently Shared With</h6>
+            {% if shared_entries %}
+                <div class="shared-user-list">
+                    {% for share in shared_entries %}
+                    <div class="shared-user-chip">
+                        <div class="shared-user-meta">
+                            <span class="fw-semibold"><i class="fas fa-user me-1 text-secondary"></i>{{ share.user.username }}</span>
+                            <div class="d-flex flex-column">
+                                {% if share.user.first_name or share.user.last_name %}
+                                <small>{{ share.user.first_name }} {{ share.user.last_name }}</small>
+                                {% endif %}
+                                <small class="text-muted">{{ share.get_role_display }} &middot; {{ share.description }}</small>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="share-empty">
+                    <i class="fas fa-users-slash fa-lg"></i>
+                    <div>No users have access yet.</div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if is_andon %}
+        {% include 'devices/partials/andon_snapshot.html' %}
+    {% else %}
+    <!-- Report Download -->
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h5 class="mb-0">Download Reports</h5>
+        </div>
+        <div class="card-body">
+            <form class="row g-3" action="{% url 'devices:device_report' device.id %}" method="get">
+                <div class="col-md-4">
+                    <label class="form-label">Time Period</label>
+                    <select name="period" class="form-select">
+                        <option value="daily">Last 24 Hours</option>
+                        <option value="weekly">Last 7 Days</option>
+                        <option value="monthly">Last 30 Days</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Format</label>
+                    <select name="format" class="form-select">
+                        <option value="csv">CSV</option>
+                        <option value="excel">Excel</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary d-block">
+                        <i class="fas fa-download me-2"></i> Download Report
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Device Info -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <small class="text-muted">Status</small>
+                    <div class="d-flex align-items-center mt-1">
+                        <span class="status-dot {% if device.is_active %}bg-success{% else %}bg-danger{% endif %} me-2"></span>
+                        <strong>{% if device.is_active %}Active{% else %}Inactive{% endif %}</strong>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <small class="text-muted">Last Updated</small>
+                    <div class="mt-1">
+                        <strong>{{ device.last_updated|timesince }} ago</strong>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <small class="text-muted">Polling Interval</small>
+                    <div class="mt-1">
+                        <strong>{{ device.polling_interval }} seconds</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Readings -->
+    {% if device.latest_value %}
+    <div class="readings-card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Current Readings</h5>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3 col-sm-6">
+                    <div class="reading-item">
+                        <h6 class="text-muted">Voltage</h6>
+                        <h3>{{ device.latest_value.voltage|floatformat:1 }} <small>V</small></h3>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="reading-item">
+                        <h6 class="text-muted">Current</h6>
+                        <h3>{{ device.latest_value.current|floatformat:2 }} <small>A</small></h3>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="reading-item">
+                        <h6 class="text-muted">Power Factor</h6>
+                        <h3>{{ device.latest_value.power_factor|floatformat:3 }}</h3>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="reading-item">
+                        <h6 class="text-muted">kWh</h6>
+                        <h3>{{ device.latest_value.kwh|floatformat:1 }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Graphs -->
+    <div class="row">
+        <div class="col-md-6">
+            <div class="chart-container">
+                <canvas id="voltageChart"></canvas>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="chart-container">
+                <canvas id="currentChart"></canvas>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="chart-container">
+                <canvas id="powerFactorChart"></canvas>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="chart-container">
+                <canvas id="kwhChart"></canvas>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+<form id="config-csrf-form" class="d-none">{% csrf_token %}</form>
+
+<!-- Device Config Modal -->
+<div class="modal fade" id="deviceConfigModal" tabindex="-1" aria-labelledby="deviceConfigLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="deviceConfigLabel">Device Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Device</dt><dd class="col-sm-8" id="cfgDeviceName">-</dd>
+          <dt class="col-sm-4">Installed At</dt><dd class="col-sm-8" id="cfgDeviceLocation">-</dd>
+          <dt class="col-sm-4">IP Address</dt><dd class="col-sm-8" id="cfgDeviceAddress">-</dd>
+          <dt class="col-sm-4">Status</dt><dd class="col-sm-8" id="cfgDeviceStatus">-</dd>
+          <dt class="col-sm-4">Added On</dt><dd class="col-sm-8" id="cfgDeviceCreated">-</dd>
+          <dt class="col-sm-4">Last Updated</dt><dd class="col-sm-8" id="cfgDeviceUpdated">-</dd>
+        </dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Password Confirm Modal -->
+<div class="modal fade" id="passwordConfirmModal" tabindex="-1" aria-labelledby="passwordConfirmLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="passwordConfirmLabel">Confirm Password</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3 text-muted">Enter your password to continue.</p>
+        <div class="mb-3">
+          <label for="passwordConfirmInput" class="form-label">Account Password</label>
+          <input type="password" class="form-control" id="passwordConfirmInput" name="password" required autocomplete="current-password">
+        </div>
+        <div class="text-danger small password-error" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary password-submit-btn">Continue</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% block extra_js %}
+{% if not is_andon %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
+<script>
+    const deviceId = {{ device.id }};
+    const pollingIntervalMs = {{ device.polling_interval }} * 1000;
+    const MAX_POINTS = 100;
+
+    const annotationPlugin = window.ChartAnnotation || window['chartjs-plugin-annotation'];
+    if (annotationPlugin) {
+        Chart.register(annotationPlugin);
+    } else {
+        console.warn('Chart.js annotation plugin failed to load');
+    }
+
+    const timestamps = {{ chart_data.timestamps|safe }};
+    const voltageData = {{ chart_data.voltage|safe }};
+    const currentData = {{ chart_data.current|safe }};
+    const powerFactorData = {{ chart_data.power_factor|safe }};
+    const kwhData = {{ chart_data.kwh|safe }};
+
+    const chartConfigs = [
+        { key: 'voltage', label: 'Voltage (V)', color: '#4e73df', background: 'rgba(78, 115, 223, 0.1)', elementId: 'voltageChart', initial: voltageData, guides: { max: '#2e59d9', min: '#a5b9ff' } },
+        { key: 'current', label: 'Current (A)', color: '#1cc88a', background: 'rgba(28, 200, 138, 0.1)', elementId: 'currentChart', initial: currentData, guides: { max: '#17a673', min: '#9de9c6' } },
+        { key: 'power_factor', label: 'Power Factor', color: '#f6c23e', background: 'rgba(246, 194, 62, 0.1)', elementId: 'powerFactorChart', initial: powerFactorData, guides: { max: '#dda20a', min: '#f8e6a0' } },
+        { key: 'kwh', label: 'kWh', color: '#e74a3b', background: 'rgba(231, 74, 59, 0.1)', elementId: 'kwhChart', initial: kwhData, guides: { max: '#d13224', min: '#f5a29b' } }
+    ];
+
+    const charts = {};
+
+    const maxMinTagPlugin = {
+        id: 'maxMinTag',
+        afterDatasetsDraw(chart) {
+            const info = chart.$maxMin;
+            const yScale = chart.scales.y;
+            if (!info || !yScale) {
+                return;
+            }
+
+            const ctx = chart.ctx;
+            const area = chart.chartArea;
+            const textX = area.right - 6;
+
+            ctx.save();
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+
+            function drawTag(label, value, color) {
+                if (!Number.isFinite(value)) {
+                    return;
+                }
+
+                const y = yScale.getPixelForValue(value);
+                const textWidth = ctx.measureText(label).width;
+                const lineStartX = textX - textWidth - 16;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lineStartX, y);
+                ctx.lineTo(textX, y);
+                ctx.stroke();
+
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+                ctx.strokeText(label, textX, y);
+                ctx.fillStyle = '#1a202c';
+                ctx.fillText(label, textX, y);
+            }
+
+            drawTag('Max', info.max, info.guides.max);
+            drawTag('Min', info.min, info.guides.min);
+            ctx.restore();
+        }
+    };
+
+    Chart.register(maxMinTagPlugin);
+
+    function legendFilter(item) {
+        const index = item.datasetIndex;
+        return typeof index !== 'number' || index === 0;
+    }
+
+    function getBaseOptions() {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    grid: { display: false }
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { filter: legendFilter }
+                },
+                annotation: { annotations: {} }
+            }
+        };
+    }
+
+    function sliceLatest(series = []) {
+        return series.slice(-MAX_POINTS);
+    }
+
+    function extractTimeLabel(label) {
+        if (typeof label !== 'string') {
+            return label;
+        }
+        const trimmed = label.trim();
+        if (!trimmed) {
+            return trimmed;
+        }
+        const segments = trimmed.split(/[T ]+/);
+        const lastSegment = segments[segments.length - 1] || trimmed;
+        return lastSegment.replace(/Z$/, '');
+    }
+
+    function normalizeSeries(series = []) {
+        return series.map((value) => {
+            if (value === null || value === undefined || value === '') {
+                return null;
+            }
+            const number = Number(value);
+            return Number.isFinite(number) ? number : null;
+        });
+    }
+
+    function numericSeries(series = []) {
+        return series.filter((value) => Number.isFinite(value));
+    }
+
+    function formatValue(value) {
+        return Number.isFinite(value) ? value.toFixed(2) : 'N/A';
+    }
+
+    function labelWithValue(prefix, value) {
+        return `${prefix}: ${formatValue(value)}`;
+    }
+
+    function computeExtremes(series = []) {
+        const numeric = numericSeries(series);
+        if (!numeric.length) {
+            return { max: null, min: null };
+        }
+        const max = Math.max(...numeric);
+        const min = Math.min(...numeric);
+        return { max: Number(max.toFixed(2)), min: Number(min.toFixed(2)) };
+    }
+
+    function createConstantSeries(value, length) {
+        if (!Number.isFinite(value)) {
+            return new Array(length).fill(null);
+        }
+        return Array.from({ length }, () => value);
+    }
+
+    function buildGuideDataset(prefix, color, value, length) {
+        return {
+            label: labelWithValue(prefix, value),
+            borderColor: color,
+            borderDash: [6, 6],
+            borderWidth: 1,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            tension: 0,
+            fill: false,
+            data: createConstantSeries(value, length)
+        };
+    }
+
+    function updateGuideDatasets(chart, labels, extremes) {
+        const [, maxDataset, minDataset] = chart.data.datasets;
+        maxDataset.data = createConstantSeries(extremes.max, labels.length);
+        maxDataset.label = labelWithValue('Max', extremes.max);
+        minDataset.data = createConstantSeries(extremes.min, labels.length);
+        minDataset.label = labelWithValue('Min', extremes.min);
+    }
+
+    function applyMinMaxAnnotations(chart, series, colors) {
+        if (!annotationPlugin) {
+            return;
+        }
+
+        const numeric = numericSeries(series);
+        if (!numeric.length) {
+            chart.options.plugins.annotation.annotations = {};
+            return;
+        }
+
+        const max = Math.max(...numeric);
+        const min = Math.min(...numeric);
+
+        chart.options.plugins.annotation.annotations = {
+            maxLine: {
+                type: 'line',
+                yMin: max,
+                yMax: max,
+                borderColor: colors.max,
+                borderWidth: 1,
+                borderDash: [6, 6],
+                label: {
+                    enabled: true,
+                    content: 'Max',
+                    position: 'start',
+                    backgroundColor: colors.max,
+                    color: '#fff',
+                    padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                    font: { size: 13, weight: 'bold' },
+                    xAdjust: -10
+                }
+            },
+            minLine: {
+                type: 'line',
+                yMin: min,
+                yMax: min,
+                borderColor: colors.min,
+                borderWidth: 1,
+                borderDash: [6, 6],
+                label: {
+                    enabled: true,
+                    content: 'Min',
+                    position: 'start',
+                    backgroundColor: colors.min,
+                    color: '#000',
+                    padding: { top: 6, right: 10, bottom: 6, left: 10 },
+                    font: { size: 13, weight: 'bold' },
+                    xAdjust: -10
+                }
+            }
+        };
+    }
+
+    function buildChart(config) {
+        const ctx = document.getElementById(config.elementId);
+        const labels = sliceLatest(timestamps).map(extractTimeLabel);
+        const normalizedData = sliceLatest(normalizeSeries(config.initial));
+        const extremes = computeExtremes(normalizedData);
+
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: config.label,
+                        data: normalizedData,
+                        borderColor: config.color,
+                        backgroundColor: config.background,
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        spanGaps: true,
+                        pointRadius: 0
+                    },
+                    buildGuideDataset('Max', config.guides.max, extremes.max, labels.length),
+                    buildGuideDataset('Min', config.guides.min, extremes.min, labels.length)
+                ]
+            },
+            options: getBaseOptions()
+        });
+
+        charts[config.key] = { chart, guides: config.guides };
+        chart.$maxMin = { max: extremes.max, min: extremes.min, guides: config.guides };
+        applyMinMaxAnnotations(chart, normalizedData, config.guides);
+    }
+
+    function updateChart(key, labels, series) {
+        const entry = charts[key];
+        if (!entry) {
+            return;
+        }
+
+        const { chart, guides } = entry;
+        const latestLabels = sliceLatest(labels).map(extractTimeLabel);
+        const normalizedData = sliceLatest(normalizeSeries(series));
+        const extremes = computeExtremes(normalizedData);
+
+        chart.data.labels = latestLabels;
+        chart.data.datasets[0].data = normalizedData;
+        updateGuideDatasets(chart, latestLabels, extremes);
+        chart.$maxMin = { max: extremes.max, min: extremes.min, guides };
+        applyMinMaxAnnotations(chart, normalizedData, guides);
+        chart.update('none');
+    }
+
+    async function fetchChartData() {
+        const response = await fetch(`/api/devices/${deviceId}`, { credentials: 'same-origin' });
+        if (!response.ok) throw new Error(`Failed to load chart data: ${response.status}`);
+        const payload = await response.json();
+        return payload.chart_data;
+    }
+
+    async function requestPoll() {
+        try {
+            await fetch(`/api/devices/${deviceId}/poll`, { method: 'POST', credentials: 'same-origin' });
+        } catch (error) {
+            console.warn('Unable to queue poll request', error);
+        }
+    }
+
+    async function refreshCharts() {
+        try {
+            const data = await fetchChartData();
+            if (!data) return;
+            chartConfigs.forEach(({ key }) => updateChart(key, data.timestamps, data[key]));
+        } catch (error) {
+            console.error('Error refreshing charts', error);
+        } finally {
+            requestPoll();
+        }
+    }
+
+document.addEventListener('DOMContentLoaded', () => {
+        chartConfigs.forEach(buildChart);
+        refreshCharts();
+        setInterval(refreshCharts, pollingIntervalMs);
+    });
+</script>
+{% endif %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const Modal = (typeof bootstrap !== 'undefined' && bootstrap.Modal) ? bootstrap.Modal : null;
+  if (!Modal) {
+    return;
+  }
+
+  const configModalEl = document.getElementById('deviceConfigModal');
+  const configModal = configModalEl ? new Modal(configModalEl) : null;
+  const passwordModalEl = document.getElementById('passwordConfirmModal');
+  const passwordModal = passwordModalEl ? new Modal(passwordModalEl) : null;
+  const passwordForm = passwordModalEl ? passwordModalEl.querySelector('form') : null;
+  const passwordInput = passwordModalEl ? passwordModalEl.querySelector('input[name="password"]') : null;
+  const errorEl = passwordModalEl ? passwordModalEl.querySelector('.password-error') : null;
+  const submitBtn = passwordModalEl ? passwordModalEl.querySelector('.password-submit-btn') : null;
+
+  const csrfToken = (document.querySelector('input[name="csrfmiddlewaretoken"]') || {}).value || '';
+  let pendingConfigUrl = null;
+
+  function showError(message) {
+    if (errorEl) {
+      errorEl.textContent = message || '';
+    }
+  }
+
+  function setBusy(isBusy) {
+    if (!submitBtn) {
+      return;
+    }
+    if (isBusy) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Verifying…';
+    } else {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Continue';
+    }
+  }
+
+  async function requestDeviceConfig(password) {
+    if (!pendingConfigUrl) {
+      throw new Error('No device selected.');
+    }
+
+    const response = await fetch(pendingConfigUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-CSRFToken': csrfToken,
+      },
+      body: new URLSearchParams({ password }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || 'Unable to verify password.');
+    }
+    return payload.device || {};
+  }
+
+  const fieldMap = {
+    name: document.getElementById('cfgDeviceName'),
+    location: document.getElementById('cfgDeviceLocation'),
+    address: document.getElementById('cfgDeviceAddress'),
+    status: document.getElementById('cfgDeviceStatus'),
+    created: document.getElementById('cfgDeviceCreated'),
+    updated: document.getElementById('cfgDeviceUpdated'),
+  };
+
+  function populateConfigFields(device) {
+    if (!device) {
+      return;
+    }
+    if (fieldMap.name) fieldMap.name.textContent = device.name || '—';
+    if (fieldMap.location) fieldMap.location.textContent = device.location || '—';
+    if (fieldMap.address) fieldMap.address.textContent = device.address || '—';
+    if (fieldMap.status) fieldMap.status.textContent = device.status || '—';
+    if (fieldMap.created) fieldMap.created.textContent = device.created || '—';
+    if (fieldMap.updated) fieldMap.updated.textContent = device.updated || '—';
+  }
+
+  document.querySelectorAll('.device-config-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const url = this.dataset.configUrl;
+      if (!url) {
+        return;
+      }
+      pendingConfigUrl = url;
+      showError('');
+      setBusy(false);
+      if (passwordModal) {
+        passwordModal.show();
+      }
+      if (passwordInput) {
+        passwordInput.focus();
+      }
+    });
+  });
+
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      if (!passwordInput) {
+        return;
+      }
+
+      const password = passwordInput.value.trim();
+      if (!password) {
+        showError('Password is required.');
+        return;
+      }
+
+      setBusy(true);
+      try {
+        const device = await requestDeviceConfig(password);
+        populateConfigFields(device);
+        if (passwordModal) {
+          passwordModal.hide();
+        }
+        if (configModal) {
+          configModal.show();
+        }
+      } catch (error) {
+        showError(error.message || 'Unable to verify password.');
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
+  if (passwordModalEl) {
+    passwordModalEl.addEventListener('hidden.bs.modal', function () {
+      if (passwordForm) {
+        passwordForm.reset();
+      }
+      showError('');
+      pendingConfigUrl = null;
+    });
+  }
+});
+</script>
+{% endblock %}

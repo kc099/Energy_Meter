@@ -1,0 +1,386 @@
+{% extends 'base.html' %}
+
+{% block title %}Share Devices{% endblock %}
+
+{% block content %}
+<style>
+    .remove-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(2px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1050;
+    }
+    .remove-overlay.show {
+        display: flex;
+    }
+    .remove-card {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 24px 40px rgba(15, 23, 42, 0.35);
+        padding: 1.75rem;
+        width: min(520px, 92vw);
+        max-height: 85vh;
+        overflow-y: auto;
+    }
+    .remove-card .user-list {
+        max-height: 320px;
+        overflow-y: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #f8fafc;
+    }
+    .remove-card .user-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+    }
+    .remove-card .user-item + .user-item {
+        border-top: 1px solid #e2e8f0;
+    }
+</style>
+<div class="row justify-content-center">
+    <div class="col-12 col-xl-9">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Share Devices</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Share one or many of your devices with an existing user by entering their email or username.</p>
+                <form method="post" id="bulk-share-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" id="bulk-action" value="">
+                    <input type="hidden" name="remove_all" id="remove-all-flag" value="0">
+                    <div id="remove-user-fields"></div>
+                    <div class="row g-3 align-items-end mb-4">
+                        <div class="col-md-5 col-lg-4">
+                            <label for="share-identifier" class="form-label">Email or Username</label>
+                            <input type="text" id="share-identifier" name="identifier" class="form-control" placeholder="user@example.com" value="{{ identifier }}" list="share-suggestions">
+                            <div class="form-text">Suggestions include active users you can share with.</div>
+                            <datalist id="share-suggestions">
+                                {% for user in available_users %}
+                                    {% if user.email %}
+                                    <option value="{{ user.email }}">{{ user.username }}</option>
+                                    {% endif %}
+                                    <option value="{{ user.username }}">{{ user.username }}</option>
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="col-md-3 col-lg-3">
+                            <label for="share-role" class="form-label">Access Level</label>
+                            <select id="share-role" name="role" class="form-select">
+                                {% for option in role_choices %}
+                                <option value="{{ option.value }}" data-description="{{ option.description }}" {% if option.value == selected_role %}selected{% endif %}>
+                                    {{ option.label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text" id="share-role-description"></div>
+                        </div>
+                        <div class="col-md-3 col-lg-3 d-none" id="password-wrapper">
+                            <label for="share-password" class="form-label">Confirm Password</label>
+                            <input type="password" id="share-password" name="password" class="form-control" placeholder="Enter your password">
+                            <div class="form-text">Enter your password to complete sharing.</div>
+                        </div>
+                        <div class="col-md-3 col-lg-2 d-flex gap-2">
+                            <button type="submit" class="btn btn-success flex-grow-1" data-share-button>
+                                <i class="fas fa-user-plus me-1"></i> Share Selected
+                            </button>
+                            <button type="button" class="btn btn-outline-danger flex-grow-1" data-remove-button>
+                                <i class="fas fa-user-minus me-1"></i> Remove Access
+                            </button>
+                        </div>
+                    </div>
+                    <div class="alert alert-info py-2 px-3 small mb-4">
+                        {% for option in role_choices %}
+                            <strong>{{ option.label }}:</strong> {{ option.description }}{% if not forloop.last %}<br>{% endif %}
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        <h6 class="fw-semibold">Select devices to share</h6>
+                        <p class="text-muted small mb-3">Check one or many devices to manage sharing. Click a username tag to target a single user, or leave the user field empty to remove everyone from the selected devices.</p>
+                        {% if devices %}
+                        <div class="list-group">
+                            {% for device in devices %}
+                            {% with device_id_str=device.id|stringformat:'s' %}
+                            <div class="list-group-item d-flex align-items-start justify-content-between" data-device-id="{{ device.id }}">
+                                <div class="form-check">
+                                    <input class="form-check-input me-2" type="checkbox" name="device_ids" value="{{ device.id }}" id="device-{{ device.id }}" {% if device_id_str in selected_ids %}checked{% endif %}>
+                                    <label class="form-check-label" for="device-{{ device.id }}">
+                                        <span class="fw-semibold">{{ device.device_type|capfirst }} at {{ device.located_at }}</span>
+                                        <!-- <small class="d-block text-muted">{{ device.device_address }}</small> -->
+                                    </label>
+                                </div>
+                                <div class="text-end small text-muted">
+                                    {% with shared_list=device.device_shares.all %}
+                                        {% if shared_list %}
+                                            <strong>Shared with:</strong>
+                                            {% for share in shared_list %}
+                                                <button type="button"
+                                                        class="btn btn-sm btn-outline-secondary ms-2"
+                                                        data-fill-identifier="{{ share.user.email|default:share.user.username }}">
+                                                    {{ share.user.username }}
+                                                </button>
+                                                <span class="badge rounded-pill text-bg-light ms-1">{{ share.get_role_display }}</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="text-muted fst-italic">Not shared</span>
+                                        {% endif %}
+                                    {% endwith %}
+                                </div>
+                                <div class="shared-users-data d-none">
+                                    {% for share in device.device_shares.all %}
+                                    <span data-user-id="{{ share.user.id }}"
+                                          data-username="{{ share.user.username }}"
+                                          data-email="{{ share.user.email }}"
+                                          data-role="{{ share.role }}"
+                                          data-role-label="{{ share.get_role_display }}"></span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endwith %}
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info mb-0">You do not have any devices to share yet.</div>
+                        {% endif %}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="remove-overlay" id="remove-overlay" role="dialog" aria-modal="true" aria-labelledby="remove-overlay-title">
+    <div class="remove-card">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <h5 class="mb-0" id="remove-overlay-title">Remove Device Access</h5>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-remove-cancel>&times;</button>
+        </div>
+        <p class="text-muted small">Choose the users who should lose access to the selected devices.</p>
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="remove-overlay-all" value="__all__">
+            <label class="form-check-label fw-semibold text-danger" for="remove-overlay-all">
+                Remove everyone from selected devices
+            </label>
+        </div>
+        <div class="user-list mb-3" id="remove-overlay-users"></div>
+        <div class="alert alert-info d-none" id="remove-overlay-empty">
+            No shared users found for the selected devices. You can still remove everyone to clear permissions.
+        </div>
+        <div class="d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-remove-cancel>Cancel</button>
+            <button type="button" class="btn btn-danger" data-remove-confirm>
+                <i class="fas fa-user-minus me-1"></i> Remove Access
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('bulk-share-form');
+    if (!form) {
+        return;
+    }
+
+    const passwordWrapper = document.getElementById('password-wrapper');
+    const passwordInput = document.getElementById('share-password');
+    const shareButton = form.querySelector('[data-share-button]');
+    const removeButton = form.querySelector('[data-remove-button]');
+    const identifierInput = document.getElementById('share-identifier');
+    const identifierButtons = form.querySelectorAll('[data-fill-identifier]');
+    const bulkActionInput = document.getElementById('bulk-action');
+    const removeAllInput = document.getElementById('remove-all-flag');
+    const removeUserFields = document.getElementById('remove-user-fields');
+    const removeOverlay = document.getElementById('remove-overlay');
+    const removeOverlayAll = document.getElementById('remove-overlay-all');
+    const removeOverlayUsers = document.getElementById('remove-overlay-users');
+    const removeOverlayEmpty = document.getElementById('remove-overlay-empty');
+    const removeConfirmBtn = removeOverlay ? removeOverlay.querySelector('[data-remove-confirm]') : null;
+    const removeCancelBtns = removeOverlay ? removeOverlay.querySelectorAll('[data-remove-cancel]') : [];
+    const roleSelect = document.getElementById('share-role');
+    const roleDescription = document.getElementById('share-role-description');
+
+    if (roleSelect && roleDescription) {
+        const updateRoleDescription = () => {
+            const option = roleSelect.selectedOptions[0];
+            roleDescription.textContent = option ? (option.getAttribute('data-description') || '') : '';
+        };
+        updateRoleDescription();
+        roleSelect.addEventListener('change', updateRoleDescription);
+    }
+
+    function showOverlay() {
+        if (removeOverlay) {
+            removeOverlay.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    function hideOverlay() {
+        if (removeOverlay) {
+            removeOverlay.classList.remove('show');
+            document.body.style.overflow = '';
+        }
+    }
+
+    if (shareButton) {
+        shareButton.addEventListener('click', function (event) {
+            bulkActionInput.value = 'share';
+            removeAllInput.value = '0';
+            removeUserFields.innerHTML = '';
+
+            if (!identifierInput.value.trim()) {
+                event.preventDefault();
+                identifierInput.focus();
+                window.alert('Enter a user email or username before sharing.');
+                return;
+            }
+
+            if (passwordWrapper.classList.contains('d-none')) {
+                event.preventDefault();
+                passwordWrapper.classList.remove('d-none');
+                passwordInput.focus();
+                return;
+            }
+
+            if (!passwordInput.value.trim()) {
+                event.preventDefault();
+                passwordInput.focus();
+            }
+        });
+    }
+
+    if (removeButton) {
+        removeButton.addEventListener('click', function () {
+            const selectedDevices = form.querySelectorAll('input[name="device_ids"]:checked');
+            if (!selectedDevices.length) {
+                window.alert('Select at least one device to remove access.');
+                return;
+            }
+
+            const userMap = new Map();
+            selectedDevices.forEach(function (checkbox) {
+                const item = checkbox.closest('[data-device-id]');
+                if (!item) {
+                    return;
+                }
+                item.querySelectorAll('.shared-users-data span').forEach(function (span) {
+                    const userId = span.getAttribute('data-user-id');
+                    if (!userId) {
+                        return;
+                    }
+                    if (!userMap.has(userId)) {
+                        userMap.set(userId, {
+                            id: userId,
+                            username: span.getAttribute('data-username') || 'Unknown',
+                            email: span.getAttribute('data-email') || '',
+                            role: span.getAttribute('data-role') || '',
+                            roleLabel: span.getAttribute('data-role-label') || 'Data Viewer',
+                        });
+                    }
+                });
+            });
+
+            removeAllInput.value = '0';
+            removeUserFields.innerHTML = '';
+            removeOverlayAll.checked = false;
+            removeOverlayUsers.innerHTML = '';
+
+            const users = Array.from(userMap.values());
+            if (!users.length) {
+                removeOverlayEmpty.classList.remove('d-none');
+                removeOverlayAll.checked = true;
+            } else {
+                removeOverlayEmpty.classList.add('d-none');
+                users.forEach(function (user) {
+                    const row = document.createElement('div');
+                    row.className = 'user-item';
+                    row.innerHTML = `
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" value="${user.id}" id="remove-user-${user.id}">
+                            <label class="form-check-label" for="remove-user-${user.id}">
+                                <span class="fw-semibold">${user.username}</span>
+                                <br><small class="text-muted">${user.email || ''}</small>
+                            </label>
+                        </div>
+                        <span class="badge rounded-pill text-bg-light">${user.roleLabel}</span>
+                    `;
+                    removeOverlayUsers.appendChild(row);
+                });
+            }
+
+            showOverlay();
+        });
+    }
+
+    identifierButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const value = btn.getAttribute('data-fill-identifier') || '';
+            if (value) {
+                identifierInput.value = value;
+                identifierInput.focus();
+            }
+        });
+    });
+
+    if (removeConfirmBtn) {
+        removeConfirmBtn.addEventListener('click', function () {
+            const allCheckboxes = removeOverlayUsers.querySelectorAll('input[type="checkbox"]');
+            const selectedIds = Array.from(allCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+            const removeAllSelected = removeOverlayAll.checked;
+            const hasUserOptions = allCheckboxes.length > 0;
+
+            if (!removeAllSelected && (!hasUserOptions || !selectedIds.length)) {
+                window.alert('Select at least one user or choose "Remove everyone".');
+                return;
+            }
+
+            bulkActionInput.value = 'remove';
+            removeUserFields.innerHTML = '';
+
+            if (removeAllSelected) {
+                removeAllInput.value = '1';
+            } else {
+                removeAllInput.value = '0';
+                selectedIds.forEach(function (userId) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'remove_user_ids';
+                    input.value = userId;
+                    removeUserFields.appendChild(input);
+                });
+            }
+
+            hideOverlay();
+            form.submit();
+        });
+    }
+
+    removeCancelBtns.forEach(function (btn) {
+        btn.addEventListener('click', hideOverlay);
+    });
+
+    if (removeOverlay) {
+        removeOverlay.addEventListener('click', function (event) {
+            if (event.target === removeOverlay) {
+                hideOverlay();
+            }
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && removeOverlay.classList.contains('show')) {
+                hideOverlay();
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
