@@ -12,6 +12,8 @@
                 <div class="card-body">
                     <form method="post">
                         {% csrf_token %}
+
+                        <div class="alert alert-info">After saving, you will receive a one-time provisioning token. The device stays hidden until the ESP32 claims it.</div>
                         
                         {% if form.non_field_errors %}
                             <div class="alert alert-danger">

@@ -107,6 +107,11 @@
             <a href="?poll=true" class="btn btn-outline-success">
                 <i class="fas fa-sync"></i> Refresh Data
             </a>
+            {% if is_owner %}
+            <a href="{% url 'devices:device_provisioning' device.id %}" class="btn btn-outline-warning">
+                <i class="fas fa-key"></i> Provision Token
+            </a>
+            {% endif %}
             <a href="{% url 'devices:remove_device' device.id %}" class="btn btn-outline-danger">
                 <i class="fas fa-trash"></i> Remove Device
             </a>

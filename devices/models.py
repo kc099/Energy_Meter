@@ -1,9 +1,13 @@
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 from django.core.exceptions import ValidationError
+from datetime import timedelta
 import requests
 import json
+import secrets
+import hashlib
 from .fields import EncryptedJSONField
 
 class Shift(models.Model):
@@ -90,6 +94,10 @@ class ShiftReport(models.Model):
         return f"{self.device} - {self.shift} - {self.date}"
 
 class Device(models.Model):
+    class ProvisioningState(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        PENDING = 'pending', 'Pending Claim'
+
     DEVICE_TYPE_CHOICES = [
         ('meter', 'Energy Meter'),
         ('sensor', 'Sensor'),
@@ -110,6 +118,24 @@ class Device(models.Model):
     latest_value = models.JSONField(null=True, blank=True, help_text="Latest data received from device")
     last_updated = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
+    device_secret = EncryptedJSONField(
+        null=True,
+        blank=True,
+        help_text="Encrypted API credential shared with the device",
+    )
+    device_secret_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        editable=False,
+        help_text="SHA-256 hash of the active device credential",
+    )
+    provisioning_state = models.CharField(
+        max_length=20,
+        choices=ProvisioningState.choices,
+        default=ProvisioningState.ACTIVE,
+        help_text="Tracks whether the device has completed credential provisioning",
+    )
     polling_interval = models.FloatField(default=0.5, help_text="Polling interval in seconds", editable=False)
     shared_with = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
@@ -167,6 +193,34 @@ class Device(models.Model):
         else:
             # For API endpoint, use the address as is
             return self.device_address
+
+    def issue_api_secret(self) -> str:
+        """Generate, store, and return a new device API credential."""
+        secret = secrets.token_urlsafe(32)
+        self.device_secret = secret
+        self.device_secret_hash = self._hash_secret(secret)
+        self.provisioning_state = self.ProvisioningState.ACTIVE
+        self.is_active = True
+        self.save(update_fields=['device_secret', 'device_secret_hash', 'provisioning_state', 'is_active'])
+        return secret
+
+    def clear_api_secret(self):
+        """Remove the stored API credential."""
+        self.device_secret = None
+        self.device_secret_hash = None
+        self.provisioning_state = self.ProvisioningState.PENDING
+        self.is_active = False
+        self.save(update_fields=['device_secret', 'device_secret_hash', 'provisioning_state', 'is_active'])
+
+    def validate_api_secret(self, candidate: str) -> bool:
+        """Check whether the provided secret matches the stored credential."""
+        if not candidate or not self.device_secret_hash:
+            return False
+        return constant_time_compare(self.device_secret_hash, self._hash_secret(candidate))
+
+    @staticmethod
+    def _hash_secret(value: str) -> str:
+        return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
     def poll_device(self):
         """
@@ -235,6 +289,82 @@ class Device(models.Model):
             self.is_active = False
             self.save()
             return False, str(e)
+
+
+class DeviceProvisioningToken(models.Model):
+    DEFAULT_LIFETIME = timedelta(minutes=10)
+
+    device = models.ForeignKey('Device', on_delete=models.CASCADE, related_name='provisioning_tokens')
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='issued_device_tokens',
+    )
+    metadata = models.JSONField(null=True, blank=True, help_text="Additional context captured during provisioning")
+
+    class Meta:
+        db_table = 'device_provisioning_tokens'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status = 'used' if self.used_at else 'pending'
+        return f"Token for {self.device_id} ({status})"
+
+    @classmethod
+    def issue(
+        cls,
+        device,
+        created_by=None,
+        lifetime: timedelta | None = None,
+        metadata: dict | None = None,
+    ) -> tuple[str, "DeviceProvisioningToken"]:
+        token = secrets.token_urlsafe(32)
+        lifetime = lifetime or cls.DEFAULT_LIFETIME
+        expires_at = timezone.now() + lifetime
+        token_obj = cls.objects.create(
+            device=device,
+            token_hash=cls._hash(token),
+            expires_at=expires_at,
+            created_by=created_by,
+            metadata=metadata or {},
+        )
+        return token, token_obj
+
+    @staticmethod
+    def _hash(token: str) -> str:
+        return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+    @classmethod
+    def find_active(cls, token: str):
+        token_hash = cls._hash(token)
+        try:
+            candidate = cls.objects.select_related('device').get(token_hash=token_hash)
+        except cls.DoesNotExist:
+            return None
+        if not candidate.is_valid():
+            return None
+        return candidate
+
+    def mark_used(self):
+        self.used_at = timezone.now()
+        self.save(update_fields=['used_at'])
+
+    def update_metadata(self, **kwargs):
+        metadata = self.metadata or {}
+        metadata.update({k: v for k, v in kwargs.items() if v is not None})
+        self.metadata = metadata
+        self.save(update_fields=['metadata'])
+
+    def is_valid(self) -> bool:
+        if self.used_at is not None:
+            return False
+        return timezone.now() < self.expires_at
 
 
 class DeviceShare(models.Model):

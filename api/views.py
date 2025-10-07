@@ -13,10 +13,11 @@ from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.urls import reverse
 
 from accounts.models import User
 from devices.forms import DeviceForm
-from devices.models import Device, DeviceData, Shift, ShiftReport
+from devices.models import Device, DeviceData, DeviceProvisioningToken, Shift, ShiftReport
 from devices.tasks import poll_device_task
 from devices.views import generate_shift_reports_for_date
 
@@ -27,7 +28,13 @@ from .serializers import (
     serialize_shift_report,
     serialize_user,
 )
-from .utils import allow_cors, cors_json_response, login_required_json, parse_json_body
+from .utils import (
+    allow_cors,
+    cors_json_response,
+    device_token_required,
+    login_required_json,
+    parse_json_body,
+)
 
 try:  # pragma: no cover - optional dependencies
     from celery.exceptions import CeleryError
@@ -421,6 +428,142 @@ def device_poll_view(request, device_id: int):
 
 
 @allow_cors
+@csrf_exempt
+@login_required_json
+@require_http_methods(["POST"])
+def device_provision_view(request, device_id: int):
+    device = get_object_or_404(Device, id=device_id, device_owner=request.user)
+
+    try:
+        payload = parse_json_body(request)
+    except ValueError as exc:
+        return cors_json_response(request, {"message": str(exc)}, status=400)
+
+    lifetime_minutes = payload.get("lifetime_minutes")
+    lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+    if lifetime_minutes is not None:
+        try:
+            minutes = max(1, int(lifetime_minutes))
+            lifetime = timedelta(minutes=minutes)
+        except (TypeError, ValueError):
+            return cors_json_response(
+                request,
+                {"message": "lifetime_minutes must be an integer value."},
+                status=400,
+            )
+
+    metadata = {
+        "notes": payload.get("notes"),
+        "issued_from_ip": request.META.get("REMOTE_ADDR"),
+        "user_agent": request.META.get("HTTP_USER_AGENT"),
+    }
+    token, token_obj = DeviceProvisioningToken.issue(
+        device,
+        created_by=request.user,
+        lifetime=lifetime,
+        metadata={k: v for k, v in metadata.items() if v},
+    )
+
+    response_payload = {
+        "token": token,
+        "expires_at": timezone.localtime(token_obj.expires_at).isoformat(),
+        "device": {
+            "id": device.id,
+            "located_at": device.located_at,
+            "device_type": device.device_type,
+        },
+    }
+    return cors_json_response(request, response_payload, status=201)
+
+
+@allow_cors
+@csrf_exempt
+@require_http_methods(["POST"])
+def device_claim_view(request):
+    try:
+        payload = parse_json_body(request)
+    except ValueError as exc:
+        return cors_json_response(request, {"message": str(exc)}, status=400)
+
+    token = payload.get("token")
+    if not token:
+        return cors_json_response(
+            request,
+            {"message": "token is required."},
+            status=400,
+        )
+
+    candidate = DeviceProvisioningToken.find_active(token)
+    if not candidate:
+        return cors_json_response(
+            request,
+            {"message": "Invalid or expired provisioning token."},
+            status=400,
+        )
+
+    device = candidate.device
+    api_key = device.issue_api_secret()
+    device.last_updated = timezone.now()
+    device.save(update_fields=["last_updated"])
+
+    candidate.update_metadata(
+        claimed_from_ip=request.META.get("REMOTE_ADDR"),
+        claimed_at=timezone.now().isoformat(),
+        device_metadata=payload.get("device_metadata"),
+    )
+    candidate.mark_used()
+
+    ingest_path = reverse("api:device-data-ingest")
+    ingest_url = request.build_absolute_uri(ingest_path)
+
+    response_payload = {
+        "device_id": device.id,
+        "api_key": api_key,
+        "ingest_url": ingest_url,
+        "token_expires_at": timezone.localtime(candidate.expires_at).isoformat(),
+    }
+    return cors_json_response(request, response_payload, status=201)
+
+
+@allow_cors
+@csrf_exempt
+@device_token_required
+@require_http_methods(["POST"])
+def device_data_ingest_view(request):
+    try:
+        payload = parse_json_body(request)
+    except ValueError as exc:
+        return cors_json_response(request, {"message": str(exc)}, status=400)
+
+    if not isinstance(payload, dict):
+        return cors_json_response(
+            request,
+            {"message": "Payload must be a JSON object."},
+            status=400,
+        )
+
+    device = getattr(request, "device", None)
+    if device is None:
+        return cors_json_response(
+            request,
+            {"message": "Unable to determine device context."},
+            status=400,
+        )
+
+    DeviceData.objects.create(device=device, value=payload)
+    device.latest_value = payload
+    device.last_updated = timezone.now()
+    device.is_active = True
+    if device.provisioning_state != Device.ProvisioningState.ACTIVE:
+        device.provisioning_state = Device.ProvisioningState.ACTIVE
+        device.save(update_fields=["latest_value", "last_updated", "is_active", "provisioning_state"])
+    else:
+        device.save(update_fields=["latest_value", "last_updated", "is_active"])
+
+    return cors_json_response(request, {"status": "ok"}, status=201)
+
+
+@allow_cors
 @login_required_json
 @require_http_methods(["GET"])
 def dashboard_overview_view(request):
@@ -592,5 +735,3 @@ def shift_reports_generate_view(request):
         request,
         {"message": f"Generated {generated} reports for {target_date}."},
     )
-
-

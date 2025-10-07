@@ -11,6 +11,7 @@ urlpatterns = [
     path('share/', views.bulk_share_devices, name='bulk_share_devices'),
     path('<int:device_id>/', views.device_detail, name='device_detail'),
     path('<int:device_id>/remove/', views.remove_device, name='remove_device'),
+    path('<int:device_id>/provision/', views.device_provisioning, name='device_provisioning'),
     path('<int:device_id>/report/', views.device_report, name='device_report'),
     path('shifts/reports/', views.shift_reports, name='shift_reports'),
     path('shifts/', views.manage_shifts, name='manage_shifts'),

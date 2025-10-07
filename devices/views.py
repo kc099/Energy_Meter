@@ -22,12 +22,20 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.utils.dateparse import parse_datetime
 from urllib.parse import urlparse
 
 from accounts.models import User
 
 from .forms import DeviceForm
-from .models import Device, Shift, ShiftReport, DeviceData, DeviceShare
+from .models import (
+    Device,
+    Shift,
+    ShiftReport,
+    DeviceData,
+    DeviceShare,
+    DeviceProvisioningToken,
+)
 from .tasks import poll_device_task
 
 from andon.models import Station, ShiftData, SectionData
@@ -193,10 +201,16 @@ def generate_shift_reports_for_date(target_date):
 
 @login_required
 def device_list(request):
-    owned_ids = set(Device.objects.filter(device_owner=request.user).values_list('id', flat=True))
+    owned_ids = set(
+        Device.objects.filter(
+            device_owner=request.user,
+            provisioning_state=Device.ProvisioningState.ACTIVE,
+        ).values_list('id', flat=True)
+    )
     devices = (
         Device.objects.filter(
-            Q(device_owner=request.user) | Q(shared_with=request.user)
+            Q(device_owner=request.user) | Q(shared_with=request.user),
+            provisioning_state=Device.ProvisioningState.ACTIVE,
         )
         .select_related('device_owner')
         .prefetch_related('device_shares__user')
@@ -328,22 +342,26 @@ def add_device(request):
         if form.is_valid():
             device = form.save(commit=False)
             device.device_owner = request.user
+            device.is_active = False
+            device.provisioning_state = Device.ProvisioningState.PENDING
             device.save()
-            
-            # Test the device connection with retries
-            for attempt in range(3):  # Try 3 times
-                success, data = device.poll_device()
-                if success:
-                    messages.success(request, 'Device added successfully and connected!', extra_tags='connection-success')
-                    break
-                if attempt == 2:  # Last attempt
-                    messages.error(request, 'Could not establish connection with device. Please check the IP address and try again.', 
-                                 extra_tags='connection-error')
-            
-            return redirect('devices:device_list')
+
+            token, token_obj = DeviceProvisioningToken.issue(
+                device,
+                created_by=request.user,
+                metadata={'channel': 'ui', 'initiated_during_create': True},
+            )
+            request.session['provision_token_value'] = token
+            request.session['provision_token_expiry'] = token_obj.expires_at.isoformat()
+            request.session['provision_token_device'] = device.id
+            messages.success(
+                request,
+                'Device saved in pending state. Share the provisioning token to complete setup.',
+            )
+            return redirect('devices:device_provisioning', device_id=device.id)
     else:
         form = DeviceForm()
-    
+
     return render(request, 'devices/add_device.html', {'form': form})
 
 @login_required
@@ -352,6 +370,14 @@ def device_detail(request, device_id):
         Device.objects.prefetch_related('device_shares__user'), id=device_id
     )
     is_owner = device.device_owner_id == request.user.id
+
+    if device.provisioning_state != Device.ProvisioningState.ACTIVE and not is_owner:
+        raise Http404("Device not found")
+    if device.provisioning_state == Device.ProvisioningState.PENDING and is_owner:
+        messages.info(
+            request,
+            'This device is awaiting provisioning. Share the token to complete setup.',
+        )
 
     user_role = _get_device_role(device, request.user)
     if user_role is None:
@@ -372,7 +398,10 @@ def device_detail(request, device_id):
     current_time = timezone.now()
 
     accessible_devices = (
-        Device.objects.filter(Q(device_owner=request.user) | Q(shared_with=request.user))
+        Device.objects.filter(
+            Q(device_owner=request.user) | Q(shared_with=request.user),
+            provisioning_state=Device.ProvisioningState.ACTIVE,
+        )
         .prefetch_related('device_shares__user')
         .distinct()
         .order_by('id')
@@ -381,6 +410,9 @@ def device_detail(request, device_id):
     prev_device = accessible_devices.filter(id__lt=device_id).order_by('-id').first()
 
     if request.GET.get('poll') == 'true':
+        if device.provisioning_state != Device.ProvisioningState.ACTIVE:
+            messages.error(request, 'Device must complete provisioning before polling.')
+            return redirect('devices:device_provisioning', device_id=device_id)
         if not can_manage:
             messages.error(request, 'You do not have permission to trigger polling.')
             return redirect('devices:device_detail', device_id=device_id)
@@ -402,7 +434,7 @@ def device_detail(request, device_id):
             messages.error(request, f'Unexpected error queuing poll: {exc}')
         return redirect('devices:device_detail', device_id=device_id)
 
-    if can_manage:
+    if can_manage and device.provisioning_state == Device.ProvisioningState.ACTIVE:
         try:
             should_poll = (
                 device.last_updated is None or
@@ -494,6 +526,92 @@ def remove_device(request, device_id):
         messages.success(request, f'Device "{device.device_type} at {device.located_at}" has been removed.')
         return redirect('devices:device_list')
     return render(request, 'devices/remove_device.html', {'device': device})
+
+
+
+@login_required
+def device_provisioning(request, device_id):
+    device = get_object_or_404(Device, id=device_id, device_owner=request.user)
+    issued_token = None
+    issued_expires_at = None
+    default_minutes = int(DeviceProvisioningToken.DEFAULT_LIFETIME.total_seconds() // 60)
+
+    session_device_id = request.session.pop('provision_token_device', None)
+    session_token = request.session.pop('provision_token_value', None)
+    session_expiry = request.session.pop('provision_token_expiry', None)
+    if session_token and session_device_id == device.id:
+        issued_token = session_token
+        if session_expiry:
+            parsed = parse_datetime(session_expiry)
+            if parsed and timezone.is_aware(parsed):
+                issued_expires_at = timezone.localtime(parsed)
+            else:
+                issued_expires_at = parsed
+    else:
+        if session_device_id is not None and session_device_id != device.id:
+            request.session['provision_token_device'] = session_device_id
+        if session_token and session_device_id != device.id:
+            request.session['provision_token_value'] = session_token
+        if session_expiry and session_device_id != device.id:
+            request.session['provision_token_expiry'] = session_expiry
+
+    if request.method == 'POST':
+        action = request.POST.get('action', 'issue')
+        if action == 'revoke':
+            device.clear_api_secret()
+            messages.success(request, 'Device API credential revoked.')
+            return redirect('devices:device_provisioning', device_id=device.id)
+
+        lifetime_value = request.POST.get('lifetime_minutes') or default_minutes
+        try:
+            minutes = max(1, int(lifetime_value))
+        except (TypeError, ValueError):
+            minutes = default_minutes
+
+        notes = (request.POST.get('notes') or '').strip()
+        metadata = {
+            'notes': notes or None,
+            'issued_from_ip': request.META.get('REMOTE_ADDR'),
+            'channel': 'ui',
+        }
+        token, token_obj = DeviceProvisioningToken.issue(
+            device,
+            created_by=request.user,
+            lifetime=timedelta(minutes=minutes),
+            metadata={k: v for k, v in metadata.items() if v},
+        )
+        issued_token = token
+        issued_expires_at = timezone.localtime(token_obj.expires_at)
+        messages.success(request, 'Provisioning token generated successfully.')
+
+    recent_queryset = device.provisioning_tokens.select_related('created_by').order_by('-created_at')[:10]
+    now_value = timezone.now()
+    recent_tokens = []
+    for token in recent_queryset:
+        if token.used_at:
+            status = 'claimed'
+        elif token.expires_at <= now_value:
+            status = 'expired'
+        else:
+            status = 'pending'
+        recent_tokens.append({'token': token, 'status': status})
+
+    claim_url = request.build_absolute_uri(reverse('api:device-claim'))
+    ingest_url = request.build_absolute_uri(reverse('api:device-data-ingest'))
+
+    context = {
+        'device': device,
+        'issued_token': issued_token,
+        'issued_expires_at': issued_expires_at,
+        'default_minutes': default_minutes,
+        'recent_tokens': recent_tokens,
+        'has_active_secret': bool(device.device_secret_hash),
+        'provisioning_state': device.provisioning_state,
+        'claim_url': claim_url,
+        'ingest_url': ingest_url,
+    }
+    return render(request, 'devices/device_provision.html', context)
+
 
 @login_required
 def manage_shifts(request):

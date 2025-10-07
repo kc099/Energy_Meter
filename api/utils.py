@@ -6,6 +6,9 @@ from typing import Any, Callable, Dict
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from functools import wraps
+import hashlib
+
+from devices.models import Device
 
 ALLOWED_ORIGINS = getattr(settings, "API_ALLOWED_ORIGINS", ["http://localhost:3000"])
 DEFAULT_ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
@@ -86,6 +89,37 @@ def login_required_json(view_func: Callable):
                 {"detail": "Authentication credentials were not provided."},
                 status=401,
             )
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+
+def device_token_required(view_func: Callable):
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return cors_json_response(
+                request,
+                {"detail": "Device token missing."},
+                status=401,
+            )
+        token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            return cors_json_response(
+                request,
+                {"detail": "Device token missing."},
+                status=401,
+            )
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        device = Device.objects.filter(device_secret_hash=token_hash).select_related("device_owner").first()
+        if not device or not device.validate_api_secret(token):
+            return cors_json_response(
+                request,
+                {"detail": "Invalid or expired device token."},
+                status=401,
+            )
+        request.device = device
         return view_func(request, *args, **kwargs)
 
     return wrapper
