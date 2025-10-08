@@ -156,7 +156,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--poll-interval',
             type=int,
-            default=5,
+            default=0.5,
             help='Polling interval in seconds (default: 5)',
         )
 

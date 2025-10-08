@@ -101,3 +101,19 @@ EM_main/settings.py
 run_com
 EMAIL_SETUP.md*
 *.envy
+# Local env overrides
+.env
+*.env
+.venv/
+venv/
+env/
+
+# Compiled client firmware artifacts
+*.bin
+*.elf
+*.map
+
+# IDE metadata
+.idea/
+.vscode/
+*.code-workspace

@@ -376,7 +376,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
 <script>
     const deviceId = {{ device.id }};
-    const pollingIntervalMs = {{ device.polling_interval }} * 1000;
+    const pollingIntervalMs = {{ device.polling_interval }} *500;
     const MAX_POINTS = 100;
 
     const annotationPlugin = window.ChartAnnotation || window['chartjs-plugin-annotation'];

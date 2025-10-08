@@ -16,6 +16,7 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Min, Max, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
@@ -338,13 +339,49 @@ def device_config_detail(request, device_id):
 @login_required
 def add_device(request):
     if request.method == 'POST':
+        Device.purge_expired_pending(owner=request.user)
         form = DeviceForm(request.POST)
         if form.is_valid():
             device = form.save(commit=False)
             device.device_owner = request.user
             device.is_active = False
             device.provisioning_state = Device.ProvisioningState.PENDING
-            device.save()
+
+            existing = Device.objects.filter(
+                device_owner=request.user,
+                device_address=device.device_address,
+            ).first()
+
+            if existing:
+                if existing.provisioning_state == Device.ProvisioningState.PENDING:
+                    if existing.has_active_provisioning_window():
+                        form.add_error(
+                            'device_address',
+                            'A device at this address is already pending verification. Use the existing provisioning token or wait for it to expire.',
+                        )
+                        return render(request, 'devices/add_device.html', {'form': form})
+                    existing.delete()
+                else:
+                    form.add_error(
+                        'device_address',
+                        'You already have an active device registered with this address.',
+                    )
+                    return render(request, 'devices/add_device.html', {'form': form})
+
+            try:
+                with transaction.atomic():
+                    device.save()
+            except IntegrityError:
+                logger.info(
+                    "Duplicate device registration prevented for user=%s address=%s",
+                    request.user.id,
+                    device.device_address,
+                )
+                form.add_error(
+                    'device_address',
+                    'A device with this address already exists. Please verify the address or remove the existing device.',
+                )
+                return render(request, 'devices/add_device.html', {'form': form})
 
             token, token_obj = DeviceProvisioningToken.issue(
                 device,

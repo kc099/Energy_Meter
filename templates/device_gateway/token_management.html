@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Device Token Management{% endblock %}
+
+{% block extra_css %}
+<style>
+    .issued-token-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeeba;
+        border-radius: 6px;
+        padding: 12px 16px;
+        font-family: monospace;
+        word-break: break-all;
+    }
+    .token-table td, .token-table th {
+        vertical-align: middle;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                Issue Provisioning Token
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Device</label>
+                        {% if devices %}
+                        <select name="device_id" class="form-select" required>
+                            <option value="" disabled selected>Select a device…</option>
+                            {% for device in devices %}
+                                {% with origin=device.source_device %}
+                                <option value="{{ device.id }}">
+                                    {% if origin %}
+                                        {{ origin.device_type|capfirst }} #{{ origin.id }} — {{ origin.located_at|default:'No location' }}
+                                    {% else %}
+                                        {{ device.name }}{% if device.location %} — {{ device.location }}{% endif %}
+                                    {% endif %}
+                                </option>
+                                {% endwith %}
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <div class="alert alert-info mb-0">
+                            No devices found. Add a device first, then return to issue tokens.
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="form-label">Lifetime (minutes)</label>
+                            <input type="number" name="lifetime_minutes" class="form-control" min="1" placeholder="10">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label">Notes</label>
+                            <input type="text" name="notes" class="form-control" placeholder="Optional memo">
+                        </div>
+                    </div>
+                    <div class="mt-3 text-end">
+                        <button type="submit" class="btn btn-primary" {% if not devices %}disabled{% endif %}>Generate Token</button>
+                    </div>
+                </form>
+                {% if issued_token %}
+                <div class="mt-3">
+                    <div class="alert alert-warning mb-2">Copy this token now; it will not be shown again.</div>
+                    <div class="issued-token-box">{{ issued_token }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6 mt-4 mt-lg-0">
+        <div class="card shadow-sm">
+            <div class="card-header bg-secondary text-white">
+                Recent Tokens
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-striped mb-0 token-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Device</th>
+                                <th scope="col">Issued</th>
+                                <th scope="col">Expires</th>
+                                <th scope="col">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for token in tokens %}
+                            <tr>
+                                <td>
+                                    {% with origin=token.device.source_device %}
+                                        {% if origin %}
+                                            <strong>{{ origin.device_type|capfirst }} #{{ origin.id }}</strong><br>
+                                            <small class="text-muted">{{ origin.located_at|default:'No location' }}</small>
+                                        {% else %}
+                                            <strong>{{ token.device.name }}</strong>
+                                            {% if token.device.location %}<br><small class="text-muted">{{ token.device.location }}</small>{% endif %}
+                                        {% endif %}
+                                    {% endwith %}
+                                </td>
+                                <td>{{ token.created_at|date:"Y-m-d H:i" }}</td>
+                                <td>{{ token.expires_at|date:"Y-m-d H:i" }}</td>
+                                <td>
+                                    {% if token.used_at %}
+                                        <span class="badge bg-success">Claimed</span><br>
+                                        <small class="text-muted">{{ token.used_at|date:"Y-m-d H:i" }}</small>
+                                    {% elif token.expires_at < now %}
+                                        <span class="badge bg-danger">Expired</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">Pending</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">No tokens issued yet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

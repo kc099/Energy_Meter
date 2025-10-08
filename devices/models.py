@@ -290,6 +290,51 @@ class Device(models.Model):
             self.save()
             return False, str(e)
 
+    def has_active_provisioning_window(self) -> bool:
+        """Return True if there is an unexpired provisioning token for this device."""
+        now = timezone.now()
+        return self.provisioning_tokens.filter(used_at__isnull=True, expires_at__gt=now).exists()
+
+    @classmethod
+    def purge_expired_pending(cls, owner=None) -> int:
+        """Remove pending devices whose provisioning window has fully expired."""
+        now = timezone.now()
+        queryset = cls.objects.filter(provisioning_state=cls.ProvisioningState.PENDING)
+        if owner is not None:
+            queryset = queryset.filter(device_owner=owner)
+
+        pending_devices = list(queryset.only('id', 'created_at'))
+        if not pending_devices:
+            return 0
+
+        pending_ids = [device.id for device in pending_devices]
+        active_expiries = (
+            DeviceProvisioningToken.objects.filter(
+                device_id__in=pending_ids,
+                used_at__isnull=True,
+            )
+            .values('device_id')
+            .annotate(latest_expiry=models.Max('expires_at'))
+        )
+        expiry_map = {row['device_id']: row['latest_expiry'] for row in active_expiries}
+
+        default_cutoff = now - DeviceProvisioningToken.DEFAULT_LIFETIME
+        stale_ids: list[int] = []
+        for device in pending_devices:
+            latest_expiry = expiry_map.get(device.id)
+            if latest_expiry and latest_expiry > now:
+                continue
+            created_at = device.created_at
+            if created_at and created_at > default_cutoff:
+                continue
+            stale_ids.append(device.id)
+
+        if not stale_ids:
+            return 0
+
+        cls.objects.filter(id__in=stale_ids).delete()
+        return len(stale_ids)
+
 
 class DeviceProvisioningToken(models.Model):
     DEFAULT_LIFETIME = timedelta(minutes=10)
