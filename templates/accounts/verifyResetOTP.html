@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Verify Passcode | Edgesync{% endblock %}
+{% block extra_css %}
+<style>
+    .auth-wrapper {
+        min-height: calc(100vh - 120px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .auth-card {
+        max-width: 420px;
+        width: 100%;
+    }
+    .otp-input {
+        letter-spacing: 0.4rem;
+        font-size: 1.2rem;
+        text-align: center;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="auth-wrapper">
+    <div class="card shadow-sm auth-card">
+        <div class="card-body p-4">
+            <h1 class="h4 text-center text-primary mb-3">Verify the passcode</h1>
+            <p class="text-muted text-center mb-4">
+                Enter the one-time passcode sent to your email and choose a new password.
+            </p>
+            <form method="POST" action="{% url 'verify_reset_otp' %}">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label" for="email">Email address</label>
+                    <input class="form-control" id="email" name="email" type="email" value="{{ prefilled_email }}" required placeholder="you@example.com">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="otp">Passcode</label>
+                    <input class="form-control otp-input" id="otp" name="otp" type="text" inputmode="numeric" pattern="\d{6}" minlength="6" maxlength="6" required placeholder="000000">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="new_password1">New password</label>
+                    <input class="form-control" id="new_password1" name="new_password1" type="password" required autocomplete="new-password">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="new_password2">Confirm new password</label>
+                    <input class="form-control" id="new_password2" name="new_password2" type="password" required autocomplete="new-password">
+                </div>
+                <button class="btn btn-primary w-100" type="submit">Reset password</button>
+            </form>
+            <div class="text-center mt-3">
+                <a class="small d-block" href="{% url 'forgot_password' %}">Need a new passcode?</a>
+                <a class="small" href="{% url 'login' %}">Back to sign in</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

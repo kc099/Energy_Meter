@@ -90,7 +90,7 @@ class Device(models.Model):
 class DeviceProvisioningToken(models.Model):
     """One-time token issued by operators to bootstrap a device."""
 
-    DEFAULT_LIFETIME = timedelta(minutes=10)
+    DEFAULT_LIFETIME = None
 
     device = models.ForeignKey(
         Device,
@@ -98,7 +98,7 @@ class DeviceProvisioningToken(models.Model):
         related_name="provisioning_tokens",
     )
     token_hash = models.CharField(max_length=64, unique=True)
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
     used_at = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(null=True, blank=True)
 
@@ -132,12 +132,13 @@ class DeviceProvisioningToken(models.Model):
         lifetime: timedelta | None = None,
         metadata: dict | None = None,
     ) -> tuple[str, "DeviceProvisioningToken"]:
-        lifetime = lifetime or cls.DEFAULT_LIFETIME
+        if lifetime is None:
+            lifetime = cls.DEFAULT_LIFETIME
         plain = secrets.token_urlsafe(32)
         token_obj = cls.objects.create(
             device=device,
             issued_by=issued_by,
-            expires_at=timezone.now() + lifetime,
+            expires_at=(timezone.now() + lifetime) if lifetime is not None else None,
             token_hash=cls._hash(plain),
             metadata=metadata or {},
         )
@@ -148,7 +149,9 @@ class DeviceProvisioningToken(models.Model):
         candidate = cls.objects.filter(token_hash=cls._hash(token)).select_related("device").first()
         if not candidate:
             return None
-        if candidate.used_at or candidate.expires_at <= timezone.now():
+        if candidate.used_at:
+            return None
+        if candidate.expires_at is not None and candidate.expires_at <= timezone.now():
             return None
         return candidate
 

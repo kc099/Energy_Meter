@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Report Recipients | Edgesync{% endblock %}
+{% block extra_css %}
+<style>
+    .form-check-label {
+        margin-left: 0.35rem;
+    }
+    .shifts-help {
+        font-size: 0.875rem;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <h1 class="h5 text-primary mb-3">Add report recipient</h1>
+                <p class="text-muted mb-4">Create an email recipient and choose which automated reports they should receive.</p>
+                <form method="POST" novalidate>
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.email.id_for_label }}">Email address</label>
+                        {{ form.email }}
+                        {% for error in form.email.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-3">
+                        {{ form.send_daily_reports }}
+                        <label class="form-check-label" for="{{ form.send_daily_reports.id_for_label }}">
+                            Send daily summary reports
+                        </label>
+                        {% for error in form.send_daily_reports.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-3">
+                        {{ form.send_shift_reports }}
+                        <label class="form-check-label" for="{{ form.send_shift_reports.id_for_label }}">
+                            Send shift-wise reports
+                        </label>
+                        {% for error in form.send_shift_reports.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3" id="shift-selector">
+                        <label class="form-label" for="{{ form.shifts.id_for_label }}">Shifts to include</label>
+                        {{ form.shifts }}
+                        {% if form.shifts.help_text %}
+                            <div class="text-muted shifts-help">{{ form.shifts.help_text }}</div>
+                        {% endif %}
+                        {% for error in form.shifts.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% for error in form.non_field_errors %}
+                        <div class="alert alert-danger py-2">{{ error }}</div>
+                    {% endfor %}
+                    <button type="submit" class="btn btn-primary w-100">Add recipient</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 text-primary mb-3">Current recipients</h2>
+                {% if recipients %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Daily</th>
+                                    <th>Shift</th>
+                                    <th>Shifts Selected</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for recipient in recipients %}
+                                    <tr>
+                                        <td>{{ recipient.email }}</td>
+                                        <td>{% if recipient.send_daily_reports %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
+                                        <td>{% if recipient.send_shift_reports %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
+                                        <td>
+                                            {% if recipient.send_shift_reports %}
+                                                {% if recipient.shifts.all %}
+                                                    {% for shift in recipient.shifts.all %}
+                                                        <span class="badge bg-light text-dark border">{{ shift.name }}</span>
+                                                    {% empty %}
+                                                        <span class="text-muted">No shifts selected</span>
+                                                    {% endfor %}
+                                                {% else %}
+                                                    <span class="text-muted">No shifts selected</span>
+                                                {% endif %}
+                                            {% else %}
+                                                <span class="text-muted">Not applicable</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            <a class="btn btn-outline-secondary btn-sm" href="{% url 'report_recipient_edit' recipient.pk %}">Edit</a>
+                                            <a class="btn btn-outline-danger btn-sm" href="{% url 'report_recipient_delete' recipient.pk %}">Delete</a>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">No recipients configured yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+    const shiftToggle = document.getElementById('{{ form.send_shift_reports.id_for_label }}');
+    const shiftSelector = document.getElementById('shift-selector');
+    const shiftSelectEl = document.getElementById('{{ form.shifts.id_for_label }}');
+
+    function updateShiftSelector() {
+        const enabled = shiftToggle.checked;
+        shiftSelector.style.opacity = enabled ? '1' : '0.5';
+        shiftSelectEl.disabled = !enabled;
+    }
+
+    if (shiftToggle) {
+        shiftToggle.addEventListener('change', updateShiftSelector);
+        updateShiftSelector();
+    }
+</script>
+{% endblock %}

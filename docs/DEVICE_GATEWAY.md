@@ -41,7 +41,7 @@ All responses are JSON.
    ```bash
    curl -X POST http://localhost:8000/gateway/devices/1/provision \
         -H "Content-Type: application/json" \
-        -d '{"lifetime_minutes": 15, "notes": "Line A ESP32"}'
+        -d '{"notes": "Line A ESP32"}'
    ```
 
    Response:
@@ -49,7 +49,7 @@ All responses are JSON.
    ```json
    {
      "token": "<one-time-token>",
-     "expires_at": "2024-05-21T12:34:56.789Z",
+     "expires_at": null,
      "device_id": 1
    }
    ```
@@ -69,7 +69,7 @@ All responses are JSON.
      "device_id": 1,
      "api_key": "<bearer-token>",
      "ingest_url": "http://localhost:8000/gateway/device-data/ingest",
-     "token_expires_at": "2024-05-21T12:34:56.789Z"
+     "token_expires_at": null
    }
    ```
 
@@ -94,7 +94,7 @@ All responses are JSON.
 
 ## Notes
 
-- Provisioning tokens automatically expire after 10 minutes unless overridden.
+- Provisioning tokens never expire by default. Supply `lifetime_minutes` when issuing if you need an automatic timeout.
 - Issuing a new API key overwrites the previous credential; devices must use the fresh key.
 - The app stores the last payload on the `Device` record for quick debugging and keeps a history in `DeviceTelemetry`.
 - Admin screens (`/admin/`) provide read-only access to issued tokens, credentials, and telemetry samples.

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Edit Recipient | Edgesync{% endblock %}
+{% block extra_css %}
+<style>
+    .form-check-label {
+        margin-left: 0.35rem;
+    }
+    .shifts-help {
+        font-size: 0.875rem;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h1 class="h5 text-primary mb-3">Edit report recipient</h1>
+                <p class="text-muted mb-4">Update the email address and choose which reports should be delivered.</p>
+                <form method="POST" novalidate>
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.email.id_for_label }}">Email address</label>
+                        {{ form.email }}
+                        {% for error in form.email.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-3">
+                        {{ form.send_daily_reports }}
+                        <label class="form-check-label" for="{{ form.send_daily_reports.id_for_label }}">
+                            Send daily summary reports
+                        </label>
+                        {% for error in form.send_daily_reports.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-check mb-3">
+                        {{ form.send_shift_reports }}
+                        <label class="form-check-label" for="{{ form.send_shift_reports.id_for_label }}">
+                            Send shift-wise reports
+                        </label>
+                        {% for error in form.send_shift_reports.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="mb-3" id="shift-selector">
+                        <label class="form-label" for="{{ form.shifts.id_for_label }}">Shifts to include</label>
+                        {{ form.shifts }}
+                        {% if form.shifts.help_text %}
+                            <div class="text-muted shifts-help">{{ form.shifts.help_text }}</div>
+                        {% endif %}
+                        {% for error in form.shifts.errors %}
+                            <div class="text-danger small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    {% for error in form.non_field_errors %}
+                        <div class="alert alert-danger py-2">{{ error }}</div>
+                    {% endfor %}
+                    <div class="d-flex justify-content-between">
+                        <a class="btn btn-outline-secondary" href="{% url 'report_recipients' %}">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Save changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+    const shiftToggle = document.getElementById('{{ form.send_shift_reports.id_for_label }}');
+    const shiftSelector = document.getElementById('shift-selector');
+    const shiftSelectEl = document.getElementById('{{ form.shifts.id_for_label }}');
+
+    function updateShiftSelector() {
+        const enabled = shiftToggle.checked;
+        shiftSelector.style.opacity = enabled ? '1' : '0.5';
+        shiftSelectEl.disabled = !enabled;
+    }
+
+    if (shiftToggle) {
+        shiftToggle.addEventListener('change', updateShiftSelector);
+        updateShiftSelector();
+    }
+</script>
+{% endblock %}

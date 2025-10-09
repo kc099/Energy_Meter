@@ -89,3 +89,61 @@ class User(AbstractBaseUser, PermissionsMixin):
     def has_perm(self, perm, obj=None):
         return self.is_staff
 
+
+class PasswordResetOTP(models.Model):
+    """Stores time-bound OTP codes for resetting a user's password."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="password_reset_otps",
+    )
+    code = models.CharField(max_length=6)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        status = "used" if self.used_at else "active"
+        return f"OTP for {self.user.email} ({status})"
+
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    def mark_used(self):
+        if not self.used_at:
+            self.used_at = timezone.now()
+            self.save(update_fields=["used_at"])
+
+
+class ReportRecipient(models.Model):
+    """Configures who receives automated reports for a given user."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="report_recipients",
+    )
+    email = models.EmailField()
+    send_daily_reports = models.BooleanField(default=False)
+    send_shift_reports = models.BooleanField(default=False)
+    shifts = models.ManyToManyField(
+        'devices.Shift',
+        blank=True,
+        related_name='report_recipients',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'email')
+        ordering = ['email']
+
+    def __str__(self):
+        return f"{self.email} ({self.user.email})"
+
+    def requires_shift_selection(self) -> bool:
+        return self.send_shift_reports and not self.shifts.exists()

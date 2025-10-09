@@ -36,7 +36,7 @@ def issue_provisioning_token_view(request, device_id: int):
         return JsonResponse({"message": str(exc)}, status=400)
 
     lifetime_minutes = payload.get("lifetime_minutes")
-    lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+    lifetime = None
     if lifetime_minutes is not None:
         try:
             minutes = max(1, int(lifetime_minutes))
@@ -58,7 +58,7 @@ def issue_provisioning_token_view(request, device_id: int):
     return JsonResponse(
         {
             "token": token,
-            "expires_at": token_obj.expires_at.isoformat(),
+            "expires_at": token_obj.expires_at.isoformat() if token_obj.expires_at else None,
             "device_id": device.id,
         },
         status=201,
@@ -101,7 +101,7 @@ def claim_device_view(request):
             "device_id": device.id,
             "api_key": api_key,
             "ingest_url": ingest_url,
-            "token_expires_at": candidate.expires_at.isoformat(),
+            "token_expires_at": candidate.expires_at.isoformat() if candidate.expires_at else None,
         },
         status=201,
     )
@@ -196,7 +196,7 @@ def device_token_management_view(request):
             messages.error(request, "Unknown device or insufficient permissions.")
             return redirect("device-gateway:token-management")
 
-        lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+        lifetime = None
         if lifetime_minutes:
             try:
                 minutes = max(1, int(lifetime_minutes))

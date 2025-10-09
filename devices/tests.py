@@ -16,6 +16,10 @@ class DeviceProvisioningTests(TestCase):
             username='owner',
             password='pass1234',
         )
+        self._original_lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+
+    def tearDown(self):
+        DeviceProvisioningToken.DEFAULT_LIFETIME = self._original_lifetime
 
     def _create_pending_device(self, address='192.168.0.10'):
         return Device.objects.create(
@@ -29,6 +33,7 @@ class DeviceProvisioningTests(TestCase):
         )
 
     def test_purge_expired_pending_removes_device_without_active_token(self):
+        DeviceProvisioningToken.DEFAULT_LIFETIME = timedelta(minutes=10)
         device = self._create_pending_device()
         DeviceProvisioningToken.objects.create(
             device=device,
@@ -44,6 +49,7 @@ class DeviceProvisioningTests(TestCase):
         self.assertFalse(Device.objects.filter(pk=device.pk).exists())
 
     def test_purge_keeps_pending_device_with_active_token(self):
+        DeviceProvisioningToken.DEFAULT_LIFETIME = timedelta(minutes=10)
         device = self._create_pending_device()
         DeviceProvisioningToken.issue(
             device,

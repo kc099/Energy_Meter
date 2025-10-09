@@ -40,7 +40,14 @@
                                         <th>Min PF Time</th>
                                         <th>Max Power Factor</th>
                                         <th>Max PF Time</th>
-                                        <th>Average Power Factor</th>
+                                        <th>Min Current (A)</th>
+                                        <th>Min Current Time</th>
+                                        <th>Max Current (A)</th>
+                                        <th>Max Current Time</th>
+                                        <th>Min Voltage (V)</th>
+                                        <th>Min Voltage Time</th>
+                                        <th>Max Voltage (V)</th>
+                                        <th>Max Voltage Time</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -55,7 +62,14 @@
                                             <td>{{ report.min_power_factor_time|date:"H:i:s" }}</td>
                                             <td>{{ report.max_power_factor|floatformat:3 }}</td>
                                             <td>{{ report.max_power_factor_time|date:"H:i:s" }}</td>
-                                            <td>{{ report.avg_power_factor|floatformat:3 }}</td>
+                                            <td>{{ report.min_current|floatformat:3 }}</td>
+                                            <td>{% if report.min_current_time %}{{ report.min_current_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
+                                            <td>{{ report.max_current|floatformat:3 }}</td>
+                                            <td>{% if report.max_current_time %}{{ report.max_current_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
+                                            <td>{{ report.min_voltage|floatformat:2 }}</td>
+                                            <td>{% if report.min_voltage_time %}{{ report.min_voltage_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
+                                            <td>{{ report.max_voltage|floatformat:2 }}</td>
+                                            <td>{% if report.max_voltage_time %}{{ report.max_voltage_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>

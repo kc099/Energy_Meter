@@ -1,13 +1,22 @@
-from django.shortcuts import render
+from datetime import timedelta
+import secrets
+
+from django.conf import settings
 from django.contrib import messages, auth
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import redirect
+from django.contrib.auth.forms import PasswordChangeForm
+from django.core.mail import send_mail
+from django.db import IntegrityError
 from django.db.models import Q
+from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
+from django.utils import timezone
 
 from devices.models import Device, DeviceShare
 
-from .models import User
-from .forms import UserForm
+from .models import PasswordResetOTP, ReportRecipient, User
+from .forms import ReportRecipientForm, UserForm
 
 
 
@@ -134,23 +143,241 @@ def DashboardView(request):
         },
     )
 
+def _generate_otp(length: int = 6) -> str:
+    return ''.join(str(secrets.randbelow(10)) for _ in range(length))
+
+
+def _send_password_reset_otp(user: User, code: str) -> None:
+    context = {"user": user, "code": code}
+    subject = "Edgesync password reset code"
+    plain_body = render_to_string(
+        "accounts/emails/password_reset_otp_email.txt",
+        context,
+    )
+    html_body = render_to_string(
+        "accounts/emails/password_reset_otp_email.html",
+        context,
+    )
+    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+    send_mail(
+        subject,
+        plain_body,
+        from_email,
+        [user.email],
+        html_message=html_body,
+    )
+
+
+def _add_form_control_classes(form):
+    for field in form.fields.values():
+        existing = field.widget.attrs.get('class', '')
+        pieces = {cls for cls in existing.split() if cls}
+        pieces.add('form-control')
+        field.widget.attrs['class'] = ' '.join(sorted(pieces))
+
+
 def ForgotPasswordView(request):
     if request.method == 'POST':
-        email = request.POST['email']
-        if User.objects.filter(email=email).exists():
-            user = User.objects.get(email__exact=email)
-            mail_subject = 'Reset your password'
-            email_template = 'accounts/emails/reset_password_email.html'
-            send_verification_email(request, user, mail_subject, email_template)
-            messages.success(request, 'Password reset email has been sent to your email address.')
-            return redirect('login')
-        else:
-            messages.error(request, 'Account does not exist!')
+        email = request.POST.get('email', '').strip().lower()
+        if not email:
+            messages.error(request, 'Please enter the email associated with your account.')
             return redirect('forgot_password')
-    return render(request, 'accounts/forgotPassword.html')
 
-def ResetpasswordView_validate(request, uidb64, token):
-    return render(request, 'accounts/resetPassword.html')
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            messages.error(request, 'Account does not exist for the provided email.')
+            return redirect('forgot_password')
 
-def ResetPasswordView(request):
-    return render(request, 'accounts/resetPassword.html')
+        code = _generate_otp()
+        expires_at = timezone.now() + timedelta(minutes=10)
+        PasswordResetOTP.objects.filter(
+            user=user,
+            used_at__isnull=True,
+        ).update(used_at=timezone.now())
+        otp = PasswordResetOTP.objects.create(
+            user=user,
+            code=code,
+            expires_at=expires_at,
+        )
+
+        try:
+            _send_password_reset_otp(user, code)
+        except Exception:
+            otp.delete()
+            messages.error(request, 'We could not send the OTP email. Please try again later.')
+            return redirect('forgot_password')
+
+        request.session['password_reset_email'] = user.email
+        messages.success(
+            request,
+            'We sent a one-time passcode to your email. Enter it below to reset your password.',
+        )
+        return redirect('verify_reset_otp')
+
+    prefilled_email = request.session.get('password_reset_email', '')
+    return render(
+        request,
+        'accounts/forgotPassword.html',
+        {'prefilled_email': prefilled_email},
+    )
+
+
+def VerifyResetOTPView(request):
+    if request.method == 'POST':
+        email = request.POST.get('email', '').strip().lower()
+        otp_code = request.POST.get('otp', '').strip()
+        new_password1 = request.POST.get('new_password1', '')
+        new_password2 = request.POST.get('new_password2', '')
+
+        if email:
+            request.session['password_reset_email'] = email
+
+        if not all([email, otp_code, new_password1, new_password2]):
+            messages.error(request, 'All fields are required to reset your password.')
+            return redirect('verify_reset_otp')
+
+        if new_password1 != new_password2:
+            messages.error(request, 'New passwords do not match.')
+            return redirect('verify_reset_otp')
+
+        if not otp_code.isdigit() or len(otp_code) != 6:
+            messages.error(request, 'The passcode must be a 6-digit number.')
+            return redirect('verify_reset_otp')
+
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            messages.error(request, 'No account found for the provided email.')
+            return redirect('verify_reset_otp')
+
+        otp = (
+            PasswordResetOTP.objects.filter(
+                user=user,
+                code=otp_code,
+                used_at__isnull=True,
+            )
+            .order_by('-created_at')
+            .first()
+        )
+
+        if not otp:
+            messages.error(request, 'Invalid passcode. Please check the code and try again.')
+            return redirect('verify_reset_otp')
+
+        if otp.is_expired():
+            otp.mark_used()
+            messages.error(request, 'That passcode has expired. Please request a new one.')
+            return redirect('forgot_password')
+
+        user.set_password(new_password1)
+        user.save()
+
+        otp.mark_used()
+        PasswordResetOTP.objects.filter(
+            user=user,
+            used_at__isnull=True,
+        ).exclude(pk=otp.pk).update(used_at=timezone.now())
+
+        request.session.pop('password_reset_email', None)
+        messages.success(request, 'Your password has been reset. You can sign in now.')
+        return redirect('login')
+
+    prefilled_email = request.session.get('password_reset_email', '')
+    return render(
+        request,
+        'accounts/verifyResetOTP.html',
+        {'prefilled_email': prefilled_email},
+    )
+
+
+@login_required(login_url='login')
+def ChangePasswordView(request):
+    if request.method == 'POST':
+        form = PasswordChangeForm(request.user, request.POST)
+        if form.is_valid():
+            user = form.save()
+            update_session_auth_hash(request, user)
+            messages.success(request, 'Your password has been updated.')
+            return redirect('change_password')
+    else:
+        form = PasswordChangeForm(request.user)
+
+    _add_form_control_classes(form)
+    return render(request, 'accounts/changePassword.html', {'form': form})
+
+
+@login_required(login_url='login')
+def ReportRecipientListView(request):
+    recipients = (
+        request.user.report_recipients.all()
+        .prefetch_related('shifts')
+        .order_by('email')
+    )
+
+    if request.method == 'POST':
+        form = ReportRecipientForm(data=request.POST, user=request.user)
+        if form.is_valid():
+            try:
+                form.save()
+            except IntegrityError:
+                form.add_error('email', 'You already have a recipient with this email address.')
+            else:
+                messages.success(request, 'Recipient added successfully.')
+                return redirect('report_recipients')
+    else:
+        form = ReportRecipientForm(user=request.user)
+
+    return render(
+        request,
+        'accounts/reportRecipients_list.html',
+        {
+            'form': form,
+            'recipients': recipients,
+        },
+    )
+
+
+@login_required(login_url='login')
+def ReportRecipientUpdateView(request, pk):
+    recipient = get_object_or_404(ReportRecipient, pk=pk, user=request.user)
+
+    if request.method == 'POST':
+        form = ReportRecipientForm(
+            data=request.POST,
+            instance=recipient,
+            user=request.user,
+        )
+        if form.is_valid():
+            try:
+                form.save()
+            except IntegrityError:
+                form.add_error('email', 'You already have a recipient with this email address.')
+            else:
+                messages.success(request, 'Recipient updated successfully.')
+                return redirect('report_recipients')
+    else:
+        form = ReportRecipientForm(instance=recipient, user=request.user)
+
+    return render(
+        request,
+        'accounts/reportRecipient_form.html',
+        {
+            'form': form,
+            'recipient': recipient,
+        },
+    )
+
+
+@login_required(login_url='login')
+def ReportRecipientDeleteView(request, pk):
+    recipient = get_object_or_404(ReportRecipient, pk=pk, user=request.user)
+
+    if request.method == 'POST':
+        recipient.delete()
+        messages.success(request, 'Recipient removed successfully.')
+        return redirect('report_recipients')
+
+    return render(
+        request,
+        'accounts/reportRecipient_confirm_delete.html',
+        {'recipient': recipient},
+    )

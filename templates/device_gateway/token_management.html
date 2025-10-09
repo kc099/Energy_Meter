@@ -54,7 +54,8 @@
                     <div class="row g-3">
                         <div class="col-sm-6">
                             <label class="form-label">Lifetime (minutes)</label>
-                            <input type="number" name="lifetime_minutes" class="form-control" min="1" placeholder="10">
+                            <input type="number" name="lifetime_minutes" class="form-control" min="1" placeholder="Leave blank for no expiry">
+                            <div class="form-text">Leave blank to issue a token without expiration.</div>
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label">Notes</label>
@@ -105,12 +106,18 @@
                                     {% endwith %}
                                 </td>
                                 <td>{{ token.created_at|date:"Y-m-d H:i" }}</td>
-                                <td>{{ token.expires_at|date:"Y-m-d H:i" }}</td>
+                                <td>
+                                    {% if token.expires_at %}
+                                        {{ token.expires_at|date:"Y-m-d H:i" }}
+                                    {% else %}
+                                        <span class="text-muted">No expiry</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     {% if token.used_at %}
                                         <span class="badge bg-success">Claimed</span><br>
                                         <small class="text-muted">{{ token.used_at|date:"Y-m-d H:i" }}</small>
-                                    {% elif token.expires_at < now %}
+                                    {% elif token.expires_at and token.expires_at < now %}
                                         <span class="badge bg-danger">Expired</span>
                                     {% else %}
                                         <span class="badge bg-warning text-dark">Pending</span>

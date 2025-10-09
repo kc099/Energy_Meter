@@ -440,7 +440,7 @@ def device_provision_view(request, device_id: int):
         return cors_json_response(request, {"message": str(exc)}, status=400)
 
     lifetime_minutes = payload.get("lifetime_minutes")
-    lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+    lifetime = None
     if lifetime_minutes is not None:
         try:
             minutes = max(1, int(lifetime_minutes))
@@ -466,7 +466,11 @@ def device_provision_view(request, device_id: int):
 
     response_payload = {
         "token": token,
-        "expires_at": timezone.localtime(token_obj.expires_at).isoformat(),
+        "expires_at": (
+            timezone.localtime(token_obj.expires_at).isoformat()
+            if token_obj.expires_at
+            else None
+        ),
         "device": {
             "id": device.id,
             "located_at": device.located_at,
@@ -520,7 +524,11 @@ def device_claim_view(request):
         "device_id": device.id,
         "api_key": api_key,
         "ingest_url": ingest_url,
-        "token_expires_at": timezone.localtime(candidate.expires_at).isoformat(),
+        "token_expires_at": (
+            timezone.localtime(candidate.expires_at).isoformat()
+            if candidate.expires_at
+            else None
+        ),
     }
     return cors_json_response(request, response_payload, status=201)
 

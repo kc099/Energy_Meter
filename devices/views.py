@@ -389,7 +389,9 @@ def add_device(request):
                 metadata={'channel': 'ui', 'initiated_during_create': True},
             )
             request.session['provision_token_value'] = token
-            request.session['provision_token_expiry'] = token_obj.expires_at.isoformat()
+            request.session['provision_token_expiry'] = (
+                token_obj.expires_at.isoformat() if token_obj.expires_at else ''
+            )
             request.session['provision_token_device'] = device.id
             messages.success(
                 request,
@@ -571,7 +573,12 @@ def device_provisioning(request, device_id):
     device = get_object_or_404(Device, id=device_id, device_owner=request.user)
     issued_token = None
     issued_expires_at = None
-    default_minutes = int(DeviceProvisioningToken.DEFAULT_LIFETIME.total_seconds() // 60)
+    default_lifetime = DeviceProvisioningToken.DEFAULT_LIFETIME
+    default_minutes = (
+        int(default_lifetime.total_seconds() // 60)
+        if default_lifetime
+        else ''
+    )
 
     session_device_id = request.session.pop('provision_token_device', None)
     session_token = request.session.pop('provision_token_value', None)
@@ -595,15 +602,27 @@ def device_provisioning(request, device_id):
     if request.method == 'POST':
         action = request.POST.get('action', 'issue')
         if action == 'revoke':
+            password = (request.POST.get('confirm_password') or '').strip()
+            if not password:
+                messages.error(request, 'Enter your account password to revoke the credential.')
+                return redirect('devices:device_provisioning', device_id=device.id)
+            if not request.user.check_password(password):
+                messages.error(request, 'Incorrect password. Credential was not revoked.')
+                return redirect('devices:device_provisioning', device_id=device.id)
+
             device.clear_api_secret()
             messages.success(request, 'Device API credential revoked.')
             return redirect('devices:device_provisioning', device_id=device.id)
 
-        lifetime_value = request.POST.get('lifetime_minutes') or default_minutes
-        try:
-            minutes = max(1, int(lifetime_value))
-        except (TypeError, ValueError):
-            minutes = default_minutes
+        lifetime_raw = (request.POST.get('lifetime_minutes') or '').strip()
+        lifetime = None
+        if lifetime_raw:
+            try:
+                minutes = max(1, int(lifetime_raw))
+            except (TypeError, ValueError):
+                messages.error(request, 'Token lifetime must be a whole number of minutes.')
+                return redirect('devices:device_provisioning', device_id=device.id)
+            lifetime = timedelta(minutes=minutes)
 
         notes = (request.POST.get('notes') or '').strip()
         metadata = {
@@ -614,11 +633,14 @@ def device_provisioning(request, device_id):
         token, token_obj = DeviceProvisioningToken.issue(
             device,
             created_by=request.user,
-            lifetime=timedelta(minutes=minutes),
+            lifetime=lifetime,
             metadata={k: v for k, v in metadata.items() if v},
         )
         issued_token = token
-        issued_expires_at = timezone.localtime(token_obj.expires_at)
+        if token_obj.expires_at:
+            issued_expires_at = timezone.localtime(token_obj.expires_at)
+        else:
+            issued_expires_at = None
         messages.success(request, 'Provisioning token generated successfully.')
 
     recent_queryset = device.provisioning_tokens.select_related('created_by').order_by('-created_at')[:10]
@@ -627,7 +649,7 @@ def device_provisioning(request, device_id):
     for token in recent_queryset:
         if token.used_at:
             status = 'claimed'
-        elif token.expires_at <= now_value:
+        elif token.expires_at and token.expires_at <= now_value:
             status = 'expired'
         else:
             status = 'pending'

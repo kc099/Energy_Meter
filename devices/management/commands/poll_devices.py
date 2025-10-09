@@ -191,12 +191,37 @@ class Command(BaseCommand):
                 avg_pf=Avg('data__power_factor'),
                 min_voltage=Min('data__voltage'),
                 max_voltage=Max('data__voltage'),
-                avg_voltage=Avg('data__voltage')
+                avg_voltage=Avg('data__voltage'),
+                min_current=Min('data__current'),
+                max_current=Max('data__current'),
+                avg_current=Avg('data__current'),
             )
-            
+
             # Get timestamps for min/max power factor
             min_pf_record = shift_data.filter(data__power_factor=metrics['min_pf']).first()
             max_pf_record = shift_data.filter(data__power_factor=metrics['max_pf']).first()
+
+            min_voltage_record = (
+                shift_data.filter(data__voltage=metrics['min_voltage']).first()
+                if metrics['min_voltage'] is not None
+                else None
+            )
+            max_voltage_record = (
+                shift_data.filter(data__voltage=metrics['max_voltage']).first()
+                if metrics['max_voltage'] is not None
+                else None
+            )
+
+            min_current_record = (
+                shift_data.filter(data__current=metrics['min_current']).first()
+                if metrics['min_current'] is not None
+                else None
+            )
+            max_current_record = (
+                shift_data.filter(data__current=metrics['max_current']).first()
+                if metrics['max_current'] is not None
+                else None
+            )
             
             # Calculate total kWh (assuming cumulative reading)
             first_reading = shift_data.first()
@@ -219,11 +244,18 @@ class Command(BaseCommand):
                     'min_power_factor_time': min_pf_record.timestamp if min_pf_record else start_datetime,
                     'max_power_factor_time': max_pf_record.timestamp if max_pf_record else start_datetime,
                     'avg_power_factor': metrics['avg_pf'] or 0,
+                    'min_current': metrics['min_current'] or 0,
+                    'max_current': metrics['max_current'] or 0,
+                    'avg_current': metrics['avg_current'] or 0,
+                    'min_current_time': min_current_record.timestamp if min_current_record else None,
+                    'max_current_time': max_current_record.timestamp if max_current_record else None,
                     'min_voltage': metrics['min_voltage'] or 0,
                     'max_voltage': metrics['max_voltage'] or 0,
                     'avg_voltage': metrics['avg_voltage'] or 0,
+                    'min_voltage_time': min_voltage_record.timestamp if min_voltage_record else None,
+                    'max_voltage_time': max_voltage_record.timestamp if max_voltage_record else None,
                     'total_kwh': total_kwh,
-                    'data_points': shift_data.count()
+                    'data_points': shift_data.count(),
                 }
             )
             

@@ -34,7 +34,11 @@
     {% if issued_token %}
     <div class="alert alert-success">
         <h5 class="alert-heading mb-2">Provisioning Token Generated</h5>
+        {% if issued_expires_at %}
         <p class="mb-1">Share this token with the ESP32 installer. It expires at <strong>{{ issued_expires_at|date:'Y-m-d H:i:s' }}</strong>.</p>
+        {% else %}
+        <p class="mb-1">Share this token with the ESP32 installer. It does not expire until it is claimed.</p>
+        {% endif %}
         <div class="bg-dark text-white p-3 rounded">
             <code class="fw-bold">{{ issued_token }}</code>
         </div>
@@ -54,8 +58,8 @@
                         <input type="hidden" name="action" value="issue">
                         <div class="col-12">
                             <label for="lifetime_minutes" class="form-label">Token Lifetime (minutes)</label>
-                            <input type="number" min="1" name="lifetime_minutes" id="lifetime_minutes" class="form-control" value="{{ default_minutes }}">
-                            <div class="form-text">Shorter lifetimes reduce risk of reuse. Default is {{ default_minutes }} minutes.</div>
+                            <input type="number" min="1" name="lifetime_minutes" id="lifetime_minutes" class="form-control" value="{{ default_minutes }}" placeholder="Leave blank for no expiry">
+                            <div class="form-text">Leave blank to issue a token without expiration. Provide minutes to enforce an expiry time.</div>
                         </div>
                         <div class="col-12">
                             <label for="notes" class="form-label">Notes (optional)</label>
@@ -80,7 +84,12 @@
                         <form method="post" class="d-grid gap-2">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="revoke">
-                            <button type="submit" class="btn btn-outline-danger" onclick="return confirm('Revoke current device credential? The device must claim a new token afterwards.')">Revoke Credential</button>
+                            <div>
+                                <label class="form-label" for="confirm_password">Confirm with password</label>
+                                <input type="password" name="confirm_password" id="confirm_password" class="form-control" autocomplete="current-password" required>
+                                <div class="form-text">For safety, enter your account password to revoke the credential.</div>
+                            </div>
+                            <button type="submit" class="btn btn-outline-danger">Revoke Credential</button>
                         </form>
                     {% else %}
                         <p class="text-muted mb-0">No credential is currently associated with this device. Issue a provisioning token to create one.</p>
@@ -112,7 +121,13 @@
                         {% with token=entry.token %}
                         <tr>
                             <td>{{ token.created_at|date:'Y-m-d H:i' }}</td>
-                            <td>{{ token.expires_at|date:'Y-m-d H:i' }}</td>
+                            <td>
+                                {% if token.expires_at %}
+                                    {{ token.expires_at|date:'Y-m-d H:i' }}
+                                {% else %}
+                                    <span class="text-muted">No expiry</span>
+                                {% endif %}
+                            </td>
                             <td>
                                 {% if entry.status == 'claimed' %}
                                     <span class="badge bg-success">Claimed</span>
@@ -142,7 +157,7 @@
         </div>
     </div>
 
-    <div class="card shadow-sm mt-4">
+    <!-- <div class="card shadow-sm mt-4">
         <div class="card-header bg-light">
             <h5 class="mb-0">ESP32 Provisioning Steps</h5>
         </div>
@@ -154,6 +169,6 @@
                 <li>Subsequent telemetry should be POSTed to <code>{{ ingest_url }}</code> with the returned API key in the <code>Authorization</code> header.</li>
             </ol>
         </div>
-    </div>
+    </div> -->
 </div>
 {% endblock %}

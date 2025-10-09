@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
@@ -83,6 +84,17 @@ class ShiftReport(models.Model):
     max_power_factor_time = models.DateTimeField()
     avg_power_factor = models.FloatField()
     total_kwh = models.FloatField()
+    min_current = models.FloatField(default=0)
+    max_current = models.FloatField(default=0)
+    avg_current = models.FloatField(default=0)
+    min_current_time = models.DateTimeField(null=True, blank=True)
+    max_current_time = models.DateTimeField(null=True, blank=True)
+    min_voltage = models.FloatField(default=0)
+    max_voltage = models.FloatField(default=0)
+    avg_voltage = models.FloatField(default=0)
+    min_voltage_time = models.DateTimeField(null=True, blank=True)
+    max_voltage_time = models.DateTimeField(null=True, blank=True)
+    data_points = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -293,7 +305,9 @@ class Device(models.Model):
     def has_active_provisioning_window(self) -> bool:
         """Return True if there is an unexpired provisioning token for this device."""
         now = timezone.now()
-        return self.provisioning_tokens.filter(used_at__isnull=True, expires_at__gt=now).exists()
+        return self.provisioning_tokens.filter(used_at__isnull=True).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+        ).exists()
 
     @classmethod
     def purge_expired_pending(cls, owner=None) -> int:
@@ -318,13 +332,18 @@ class Device(models.Model):
         )
         expiry_map = {row['device_id']: row['latest_expiry'] for row in active_expiries}
 
-        default_cutoff = now - DeviceProvisioningToken.DEFAULT_LIFETIME
+        lifetime_window = DeviceProvisioningToken.DEFAULT_LIFETIME
+        default_cutoff = None
+        if lifetime_window is not None:
+            default_cutoff = now - lifetime_window
         stale_ids: list[int] = []
         for device in pending_devices:
             latest_expiry = expiry_map.get(device.id)
             if latest_expiry and latest_expiry > now:
                 continue
             created_at = device.created_at
+            if default_cutoff is None:
+                continue
             if created_at and created_at > default_cutoff:
                 continue
             stale_ids.append(device.id)
@@ -337,11 +356,11 @@ class Device(models.Model):
 
 
 class DeviceProvisioningToken(models.Model):
-    DEFAULT_LIFETIME = timedelta(minutes=10)
+    DEFAULT_LIFETIME = None
 
     device = models.ForeignKey('Device', on_delete=models.CASCADE, related_name='provisioning_tokens')
     token_hash = models.CharField(max_length=64, unique=True)
-    expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
     used_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(
@@ -370,8 +389,13 @@ class DeviceProvisioningToken(models.Model):
         metadata: dict | None = None,
     ) -> tuple[str, "DeviceProvisioningToken"]:
         token = secrets.token_urlsafe(32)
-        lifetime = lifetime or cls.DEFAULT_LIFETIME
-        expires_at = timezone.now() + lifetime
+        if lifetime is None:
+            lifetime = cls.DEFAULT_LIFETIME
+
+        if lifetime is None:
+            expires_at = None
+        else:
+            expires_at = timezone.now() + lifetime
         token_obj = cls.objects.create(
             device=device,
             token_hash=cls._hash(token),
@@ -409,6 +433,8 @@ class DeviceProvisioningToken(models.Model):
     def is_valid(self) -> bool:
         if self.used_at is not None:
             return False
+        if self.expires_at is None:
+            return True
         return timezone.now() < self.expires_at
 
 

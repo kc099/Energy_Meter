@@ -159,9 +159,9 @@
                 <label for="password">Password*</label>
                 <input type="password" id="password" name="password" required>
 
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
                     <div class="forgot-password" style="text-align: left; margin: 0;">
-                        <a href="{% url 'reset_password' %}">Reset Password</a>
+                        <a href="{% url 'verify_reset_otp' %}">Enter Passcode</a>
                     </div>
                     <div class="forgot-password" style="text-align: right; margin: 0;">
                         <a href="{% url 'forgot_password' %}">Forgot Password?</a>

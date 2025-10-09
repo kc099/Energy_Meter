@@ -7,10 +7,10 @@ This document explains how device owners issue provisioning tokens, how ESP32 ed
 1. Use **Devices → Add Device** to register metadata (type, location, address). Newly added devices remain hidden until claimed.
 2. After saving, the app redirects to the provisioning console with a one-time token already generated for you. Copy it securely; the device is still pending.
 3. On the provisioning page you can:
-   - Choose a new token lifetime (default 10 minutes) and optional note if you need to re-issue.
+   - Leave lifetime blank for a token that never expires, or provide minutes if you need an expiry window.
    - Click **Generate Token** to mint another token (only displayed once).
-   - Revoke the current credential if you need to force the device back to pending state.
-4. Share the token with the technician flashing the ESP32. Tokens are single-use and expire automatically.
+   - Revoke the current credential if you need to force the device back to pending state (password required).
+4. Share the token with the technician flashing the ESP32. Tokens are single-use and only expire if you specified a lifetime.
 
 Devices move from *Pending claim* to *Active* as soon as the ESP32 calls the claim endpoint. Owners can always revisit the provisioning page to audit token history (pending, claimed, expired).
 
@@ -18,7 +18,7 @@ Devices move from *Pending claim* to *Active* as soon as the ESP32 calls the cla
 
 | Purpose | Method & URL | Auth | Notes |
 | --- | --- | --- | --- |
-| Issue token programmatically | `POST /api/devices/<id>/provision` | Session cookie | Returns `{token, expires_at}` if caller owns the device. Optional `lifetime_minutes` and `notes` body fields. |
+| Issue token programmatically | `POST /api/devices/<id>/provision` | Session cookie | Returns `{token, expires_at}` if caller owns the device. `expires_at` is `null` for non-expiring tokens. Optional `lifetime_minutes` and `notes` body fields. |
 | Claim token from ESP32 | `POST /api/devices/claim` | none | Body: `{"token": "..."}`. Returns `{device_id, api_key, ingest_url}`. Token is immediately marked used. |
 | Send telemetry | `POST /api/device-data/ingest` | Bearer token | Header: `Authorization: Bearer <api_key>`. Body is JSON payload stored as historical data. |
 
@@ -38,7 +38,7 @@ Response:
   "device_id": 17,
   "api_key": "mhd6wOnL6mYk4...",
   "ingest_url": "https://example.com/api/device-data/ingest",
-  "token_expires_at": "2025-10-07T16:05:00+05:30"
+  "token_expires_at": null
 }
 ```
 
