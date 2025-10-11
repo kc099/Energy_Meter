@@ -1,15 +1,22 @@
 """Celery tasks for polling device data asynchronously."""
+import csv
 import logging
 from datetime import datetime, timedelta
 from functools import update_wrapper
-from io import BytesIO
+from io import BytesIO, StringIO
+from pathlib import Path
 
-import matplotlib
+try:
+    import matplotlib
 
-matplotlib.use("Agg")
+    matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+except Exception:  # pragma: no cover - optional dependency
+    matplotlib = None
+    plt = None
+    PdfPages = None
 
 try:
     from celery import shared_task
@@ -45,6 +52,8 @@ from .models import Device, Shift, ShiftReport, DeviceData
 from accounts.models import ReportRecipient, User
 
 logger = logging.getLogger(__name__)
+
+_HAS_MATPLOTLIB = plt is not None and PdfPages is not None
 
 
 def _should_poll(device, reference_time):
@@ -134,12 +143,28 @@ def _format_timestamp(dt):
     return timezone.localtime(dt).strftime('%Y-%m-%d %H:%M:%S')
 
 
-def _build_shift_report_pdf(shift, date):
-    reports = (
+def _shift_reports_for_period(shift, date):
+    return (
         ShiftReport.objects.filter(shift=shift, date=date)
         .select_related('device')
         .order_by('device__located_at')
     )
+
+
+def _daily_reports_for_period(date):
+    return (
+        ShiftReport.objects.filter(date=date)
+        .select_related('shift', 'device')
+        .order_by('shift__start_time', 'device__located_at')
+    )
+
+
+def _build_shift_report_pdf(shift, date):
+    if not _HAS_MATPLOTLIB:
+        logger.warning("matplotlib unavailable; falling back to CSV for shift report")
+        return None
+
+    reports = _shift_reports_for_period(shift, date)
     if not reports:
         return None
 
@@ -242,11 +267,11 @@ def _build_shift_report_pdf(shift, date):
 
 
 def _build_daily_report_pdf(date):
-    reports = (
-        ShiftReport.objects.filter(date=date)
-        .select_related('shift', 'device')
-        .order_by('shift__start_time', 'device__located_at')
-    )
+    if not _HAS_MATPLOTLIB:
+        logger.warning("matplotlib unavailable; falling back to CSV for daily report")
+        return None
+
+    reports = _daily_reports_for_period(date)
     if not reports:
         return None
 
@@ -327,15 +352,108 @@ def _build_daily_report_pdf(date):
     return buffer.getvalue()
 
 
+def _csv_rows_for_report(report):
+    return [
+        report.shift.name,
+        report.device.located_at,
+        f"{report.total_kwh:.2f}",
+        f"{report.min_power_factor:.3f}",
+        report.min_power_factor_time.strftime('%Y-%m-%d %H:%M:%S') if report.min_power_factor_time else '-',
+        f"{report.max_power_factor:.3f}",
+        report.max_power_factor_time.strftime('%Y-%m-%d %H:%M:%S') if report.max_power_factor_time else '-',
+        f"{report.avg_power_factor:.3f}",
+        f"{report.min_current:.3f}",
+        report.min_current_time.strftime('%Y-%m-%d %H:%M:%S') if report.min_current_time else '-',
+        f"{report.max_current:.3f}",
+        report.max_current_time.strftime('%Y-%m-%d %H:%M:%S') if report.max_current_time else '-',
+        f"{report.avg_current:.3f}",
+        f"{report.min_voltage:.2f}",
+        report.min_voltage_time.strftime('%Y-%m-%d %H:%M:%S') if report.min_voltage_time else '-',
+        f"{report.max_voltage:.2f}",
+        report.max_voltage_time.strftime('%Y-%m-%d %H:%M:%S') if report.max_voltage_time else '-',
+        f"{report.avg_voltage:.2f}",
+        report.data_points,
+    ]
+
+
+def _generate_shift_report_csv(shift, date):
+    reports = list(_shift_reports_for_period(shift, date))
+    if not reports:
+        return None
+
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            'Shift',
+            'Device Location',
+            'Energy (kWh)',
+            'Min PF',
+            'Min PF Time',
+            'Max PF',
+            'Max PF Time',
+            'Avg PF',
+            'Min Current (A)',
+            'Min Current Time',
+            'Max Current (A)',
+            'Max Current Time',
+            'Avg Current (A)',
+            'Min Voltage (V)',
+            'Min Voltage Time',
+            'Max Voltage (V)',
+            'Max Voltage Time',
+            'Avg Voltage (V)',
+            'Data Points',
+        ]
+    )
+    for report in reports:
+        writer.writerow(_csv_rows_for_report(report))
+    return buffer.getvalue().encode('utf-8')
+
+
+def _generate_daily_report_csv(date):
+    reports = list(_daily_reports_for_period(date))
+    if not reports:
+        return None
+
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            'Shift',
+            'Device Location',
+            'Energy (kWh)',
+            'Min PF',
+            'Min PF Time',
+            'Max PF',
+            'Max PF Time',
+            'Avg PF',
+            'Min Current (A)',
+            'Min Current Time',
+            'Max Current (A)',
+            'Max Current Time',
+            'Avg Current (A)',
+            'Min Voltage (V)',
+            'Min Voltage Time',
+            'Max Voltage (V)',
+            'Max Voltage Time',
+            'Avg Voltage (V)',
+            'Data Points',
+        ]
+    )
+    for report in reports:
+        writer.writerow(_csv_rows_for_report(report))
+    return buffer.getvalue().encode('utf-8')
+
+
 def _collect_shift_recipients(shift):
-    """Return a list of (owner, email) tuples for shift reports."""
+    """Return a list of (owner, email, recipient) tuples for shift reports."""
     seen = set()
     results = []
 
     recipients = (
         ReportRecipient.objects.filter(
             send_shift_reports=True,
-            send_daily_reports=False,
             shifts=shift,
         )
         .select_related('user')
@@ -349,7 +467,7 @@ def _collect_shift_recipients(shift):
         if lower in seen:
             continue
         seen.add(lower)
-        results.append((recipient.user, email))
+        results.append((recipient.user, email, recipient))
 
     # Fallback to legacy single-email fields if no dedicated recipients exist.
     if not results:
@@ -364,13 +482,13 @@ def _collect_shift_recipients(shift):
             if lower in seen:
                 continue
             seen.add(lower)
-            results.append((user, email))
+            results.append((user, email, None))
 
     return results
 
 
 def _collect_daily_recipients():
-    """Return a list of (owner, email) tuples for daily reports."""
+    """Return a list of (owner, email, recipient) tuples for daily reports."""
     seen = set()
     results = []
 
@@ -387,7 +505,7 @@ def _collect_daily_recipients():
         if lower in seen:
             continue
         seen.add(lower)
-        results.append((recipient.user, email))
+        results.append((recipient.user, email, recipient))
 
     if not results:
         legacy_users = User.objects.filter(daily_manager_email__isnull=False).exclude(
@@ -401,9 +519,42 @@ def _collect_daily_recipients():
             if lower in seen:
                 continue
             seen.add(lower)
-            results.append((user, email))
+            results.append((user, email, None))
 
     return results
+
+
+def _store_daily_report_offline(payload, filename):
+    reports_dir = Path.home() / "Documents" / "reports"
+    file_path = reports_dir / filename
+
+    try:
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        with file_path.open("wb") as offline_file:
+            offline_file.write(payload)
+    except Exception:  # pragma: no cover - filesystem availability differs per deploy
+        logger.exception("Failed to store daily report offline at %s", reports_dir)
+        return None
+
+    logger.info("Stored daily report at %s", file_path)
+    return file_path
+
+
+def _mark_recipient_success(recipient):
+    if not recipient:
+        return
+    recipient.last_success_at = timezone.now()
+    recipient.last_failure_at = None
+    recipient.last_failure_message = ''
+    recipient.save(update_fields=['last_success_at', 'last_failure_at', 'last_failure_message'])
+
+
+def _mark_recipient_failure(recipient, error):
+    if not recipient:
+        return
+    recipient.last_failure_at = timezone.now()
+    recipient.last_failure_message = str(error)[:1000]
+    recipient.save(update_fields=['last_failure_at', 'last_failure_message'])
 
 
 @shared_task(bind=True, ignore_result=True)
@@ -419,11 +570,29 @@ def send_shift_report_email(self, shift_id, date_str):
             logger.warning("No recipients configured for shift reports")
             return
 
-        # Generate CSV report
-        csv_content = _generate_shift_report_csv(shift, date)
+        pdf_content = _build_shift_report_pdf(shift, date)
+
+        attachment_payload = None
+        attachment_name = None
+        attachment_mime = None
+
+        if pdf_content:
+            attachment_payload = pdf_content
+            attachment_name = f"shift_report_{shift.name}_{date.strftime('%Y-%m-%d')}.pdf"
+            attachment_mime = 'application/pdf'
+        else:
+            csv_content = _generate_shift_report_csv(shift, date)
+            if not csv_content:
+                logger.warning("No shift data available for %s on %s", shift.name, date)
+                return
+            attachment_payload = csv_content
+            attachment_name = f"shift_report_{shift.name}_{date.strftime('%Y-%m-%d')}.csv"
+            attachment_mime = 'text/csv'
 
         # Send email to each user
-        for owner, email_address in recipients:
+        start_label = shift.start_time.strftime('%I:%M %p').lstrip('0').lower()
+        end_label = shift.end_time.strftime('%I:%M %p').lstrip('0').lower()
+        for owner, email_address, recipient_obj in recipients:
             subject = f"Shift Report - {shift.name} - {date.strftime('%Y-%m-%d')}"
             body = f"""
 Hello {owner.get_full_name() or owner.username},
@@ -431,7 +600,7 @@ Hello {owner.get_full_name() or owner.username},
 Please find attached the shift report for:
 - Shift: {shift.name}
 - Date: {date.strftime('%Y-%m-%d')}
-- Time: {shift.start_time.strftime('%H:%M')} - {shift.end_time.strftime('%H:%M')}
+- Time: {start_label} - {end_label}
 
 This is an automated report generated at the end of the shift.
 
@@ -445,13 +614,16 @@ Energy Meter System
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[email_address]
             )
+            email.attach(attachment_name, attachment_payload, attachment_mime)
 
-            # Attach CSV file
-            filename = f"shift_report_{shift.name}_{date.strftime('%Y-%m-%d')}.csv"
-            email.attach(filename, csv_content, 'text/csv')
-
-            email.send(fail_silently=False)
-            logger.info("Shift report sent to %s", email_address)
+            try:
+                email.send(fail_silently=False)
+            except Exception as exc:
+                _mark_recipient_failure(recipient_obj, exc)
+                raise
+            else:
+                _mark_recipient_success(recipient_obj)
+                logger.info("Shift report sent to %s", email_address)
 
     except Shift.DoesNotExist:
         logger.error(f"Shift with id {shift_id} does not exist")
@@ -467,15 +639,41 @@ def send_daily_report_email(self, date_str):
 
         recipients = _collect_daily_recipients()
 
+        pdf_content = _build_daily_report_pdf(date)
+
+        attachment_payload = None
+        attachment_name = None
+        attachment_mime = None
+
+        if pdf_content:
+            attachment_payload = pdf_content
+            attachment_name = f"daily_report_{date.strftime('%Y-%m-%d')}.pdf"
+            attachment_mime = 'application/pdf'
+        else:
+            csv_content = _generate_daily_report_csv(date)
+            if not csv_content:
+                logger.warning("No daily report data available for %s", date)
+                return
+            attachment_payload = csv_content
+            attachment_name = f"daily_report_{date.strftime('%Y-%m-%d')}.csv"
+            attachment_mime = 'text/csv'
+
+        offline_path = _store_daily_report_offline(attachment_payload, attachment_name)
+
         if not recipients:
-            logger.warning("No recipients configured for daily reports")
+            if offline_path:
+                logger.warning(
+                    "No recipients configured for daily reports; stored offline at %s",
+                    offline_path,
+                )
+            else:
+                logger.warning(
+                    "No recipients configured for daily reports and offline storage failed",
+                )
             return
 
-        # Generate CSV report
-        csv_content = _generate_daily_report_csv(date)
-
         # Send email to each user
-        for owner, email_address in recipients:
+        for owner, email_address, recipient_obj in recipients:
             subject = f"Daily Report - {date.strftime('%Y-%m-%d')}"
             body = f"""
 Hello {owner.get_full_name() or owner.username},
@@ -496,13 +694,16 @@ Energy Meter System
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[email_address]
             )
+            email.attach(attachment_name, attachment_payload, attachment_mime)
 
-            # Attach CSV file
-            filename = f"daily_report_{date.strftime('%Y-%m-%d')}.csv"
-            email.attach(filename, csv_content, 'text/csv')
-
-            email.send(fail_silently=False)
-            logger.info("Daily report sent to %s", email_address)
+            try:
+                email.send(fail_silently=False)
+            except Exception as exc:
+                _mark_recipient_failure(recipient_obj, exc)
+                raise
+            else:
+                _mark_recipient_success(recipient_obj)
+                logger.info("Daily report sent to %s", email_address)
 
     except Exception as e:
         logger.exception(f"Error sending daily report: {e}")

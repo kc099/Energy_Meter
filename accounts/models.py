@@ -137,6 +137,9 @@ class ReportRecipient(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    last_failure_at = models.DateTimeField(null=True, blank=True)
+    last_failure_message = models.TextField(blank=True)
 
     class Meta:
         unique_together = ('user', 'email')
@@ -147,3 +150,10 @@ class ReportRecipient(models.Model):
 
     def requires_shift_selection(self) -> bool:
         return self.send_shift_reports and not self.shifts.exists()
+
+    def last_status(self):
+        if self.last_success_at:
+            return 'success', self.last_success_at
+        if self.last_failure_at:
+            return 'failure', self.last_failure_at
+        return 'pending', None

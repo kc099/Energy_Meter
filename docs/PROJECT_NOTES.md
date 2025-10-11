@@ -18,6 +18,12 @@ _Last updated: 2025-10-09_
 - Documentation refreshed to match the new defaults and password-protected revocation (`docs/PROVISIONING.md`, `docs/DEVICE_GATEWAY.md`).
 - Revoking a device credential now requires the user’s password (updates at `devices/views.py`, `templates/devices/device_provision.html`).
 
+## Reporting Enhancements
+- Shift and daily report emails now attach multi-page PDF summaries with charts and metric tables instead of CSV extracts (`devices/tasks.py`).
+- Shift reports capture min/avg/max current and voltage plus the number of telemetry samples, and the web UI exposes the additional metrics (`devices/views.py`, `templates/devices/shift_reports.html`).
+- Matplotlib (Agg backend) powers the PDF rendering, so ensure the package is installed in deployments that send reports; when it is unavailable, the tasks fall back to CSV attachments so notifications still go out.
+- Email recipient management now shows the last delivery status for each address, updated automatically when shift/daily emails are sent (`accounts/models.py`, `devices/tasks.py`, `templates/accounts/reportRecipients_list.html`).
+
 ## Infrastructure / Stability
 - Celery fallback now exposes `.delay()`/`.apply_async()` even without Celery installed, preventing AttributeErrors during manual/device-driven polling (`devices/tasks.py`).
 - Device provisioning tests reset the configurable lifetime to keep purge logic stable (`devices/tests.py`).

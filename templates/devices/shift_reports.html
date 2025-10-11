@@ -40,14 +40,18 @@
                                         <th>Min PF Time</th>
                                         <th>Max Power Factor</th>
                                         <th>Max PF Time</th>
+                                        <th>Avg Power Factor</th>
                                         <th>Min Current (A)</th>
                                         <th>Min Current Time</th>
                                         <th>Max Current (A)</th>
                                         <th>Max Current Time</th>
+                                        <th>Avg Current (A)</th>
                                         <th>Min Voltage (V)</th>
                                         <th>Min Voltage Time</th>
                                         <th>Max Voltage (V)</th>
                                         <th>Max Voltage Time</th>
+                                        <th>Avg Voltage (V)</th>
+                                        <th>Data Points</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -56,20 +60,24 @@
                                             <td>{{ report.date|date:"Y-m-d" }}</td>
                                             <td>{{ report.device.device_type }} - {{ report.device.located_at }}</td>
                                             <td>{{ report.shift.name }}</td>
-                                            <td>{{ report.shift.start_time|time:"H:i" }} - {{ report.shift.end_time|time:"H:i" }}</td>
+                                            <td>{{ report.shift.start_time|time:"g:i a" }} - {{ report.shift.end_time|time:"g:i a" }}</td>
                                             <td>{{ report.total_kwh|floatformat:2 }} kWh</td>
                                             <td>{{ report.min_power_factor|floatformat:3 }}</td>
                                             <td>{{ report.min_power_factor_time|date:"H:i:s" }}</td>
                                             <td>{{ report.max_power_factor|floatformat:3 }}</td>
                                             <td>{{ report.max_power_factor_time|date:"H:i:s" }}</td>
+                                            <td>{{ report.avg_power_factor|floatformat:3 }}</td>
                                             <td>{{ report.min_current|floatformat:3 }}</td>
                                             <td>{% if report.min_current_time %}{{ report.min_current_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
                                             <td>{{ report.max_current|floatformat:3 }}</td>
                                             <td>{% if report.max_current_time %}{{ report.max_current_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
+                                            <td>{{ report.avg_current|floatformat:3 }}</td>
                                             <td>{{ report.min_voltage|floatformat:2 }}</td>
                                             <td>{% if report.min_voltage_time %}{{ report.min_voltage_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
                                             <td>{{ report.max_voltage|floatformat:2 }}</td>
                                             <td>{% if report.max_voltage_time %}{{ report.max_voltage_time|date:"H:i:s" }}{% else %}-{% endif %}</td>
+                                            <td>{{ report.avg_voltage|floatformat:2 }}</td>
+                                            <td>{{ report.data_points }}</td>
                                         </tr>
                                     {% endfor %}
                                 </tbody>

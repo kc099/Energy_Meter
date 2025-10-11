@@ -92,7 +92,7 @@
                     <div class="current-shift">
                         <span class="current-shift-label">Current Shift:</span>
                         <span class="current-shift-name">{{ current_shift.name }}</span>
-                        <small class="ms-2 opacity-75">({{ current_shift.start_time|time:"H:i" }} - {{ current_shift.end_time|time:"H:i" }})</small>
+                        <small class="ms-2 opacity-75">({{ current_shift.start_time|time:"g:i a" }} - {{ current_shift.end_time|time:"g:i a" }})</small>
                     </div>
                     {% endif %}
                     <ul class="navbar-nav ms-3 align-items-center">

@@ -24,7 +24,9 @@ class Shift(models.Model):
         ordering = ['start_time']
 
     def __str__(self):
-        return f"{self.name} ({self.start_time.strftime('%H:%M')} - {self.end_time.strftime('%H:%M')})"
+        start = self.start_time.strftime('%I:%M %p').lstrip('0').lower()
+        end = self.end_time.strftime('%I:%M %p').lstrip('0').lower()
+        return f"{self.name} ({start} - {end})"
         
     @classmethod
     def get_current_shift(cls):

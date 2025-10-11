@@ -127,15 +127,6 @@ def generate_shift_reports_for_date(target_date):
     for device in devices:
         for shift in shifts:
             # Check if report already exists
-            existing_report = ShiftReport.objects.filter(
-                shift=shift,
-                device=device,
-                date=target_date
-            ).first()
-
-            if existing_report:
-                continue  # Skip if report already exists
-
             # Generate report for this shift and device
             start_datetime = timezone.make_aware(datetime.combine(target_date, shift.start_time))
             end_datetime = timezone.make_aware(datetime.combine(target_date, shift.end_time))
@@ -160,17 +151,41 @@ def generate_shift_reports_for_date(target_date):
                 continue
 
             pf_samples: list[tuple[DeviceData, float]] = []
+            current_samples: list[tuple[DeviceData, float]] = []
+            voltage_samples: list[tuple[DeviceData, float]] = []
             for entry, payload in samples:
                 try:
                     pf_samples.append((entry, float(payload.get("power_factor"))))
                 except (TypeError, ValueError):
                     continue
+                try:
+                    current_samples.append((entry, float(payload.get("current"))))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    voltage_samples.append((entry, float(payload.get("voltage"))))
+                except (TypeError, ValueError):
+                    pass
             if not pf_samples:
                 continue
 
             min_entry, min_pf = min(pf_samples, key=lambda pair: pair[1])
             max_entry, max_pf = max(pf_samples, key=lambda pair: pair[1])
             avg_pf = sum(pf for _, pf in pf_samples) / len(pf_samples)
+
+            min_current_entry = max_current_entry = None
+            min_current = max_current = avg_current = 0.0
+            if current_samples:
+                min_current_entry, min_current = min(current_samples, key=lambda pair: pair[1])
+                max_current_entry, max_current = max(current_samples, key=lambda pair: pair[1])
+                avg_current = sum(val for _, val in current_samples) / len(current_samples)
+
+            min_voltage_entry = max_voltage_entry = None
+            min_voltage = max_voltage = avg_voltage = 0.0
+            if voltage_samples:
+                min_voltage_entry, min_voltage = min(voltage_samples, key=lambda pair: pair[1])
+                max_voltage_entry, max_voltage = max(voltage_samples, key=lambda pair: pair[1])
+                avg_voltage = sum(val for _, val in voltage_samples) / len(voltage_samples)
 
             start_kwh = end_kwh = None
             for _, payload in samples:
@@ -185,16 +200,31 @@ def generate_shift_reports_for_date(target_date):
             if start_kwh is not None and end_kwh is not None:
                 total_kwh = max(0.0, end_kwh - start_kwh)
 
-            ShiftReport.objects.create(
+            defaults = {
+                'min_power_factor': min_pf,
+                'max_power_factor': max_pf,
+                'min_power_factor_time': min_entry.timestamp,
+                'max_power_factor_time': max_entry.timestamp,
+                'avg_power_factor': avg_pf,
+                'total_kwh': total_kwh,
+                'min_current': min_current,
+                'max_current': max_current,
+                'avg_current': avg_current,
+                'min_current_time': min_current_entry.timestamp if min_current_entry else None,
+                'max_current_time': max_current_entry.timestamp if max_current_entry else None,
+                'min_voltage': min_voltage,
+                'max_voltage': max_voltage,
+                'avg_voltage': avg_voltage,
+                'min_voltage_time': min_voltage_entry.timestamp if min_voltage_entry else None,
+                'max_voltage_time': max_voltage_entry.timestamp if max_voltage_entry else None,
+                'data_points': len(samples),
+            }
+
+            _, _ = ShiftReport.objects.update_or_create(
                 shift=shift,
                 device=device,
                 date=target_date,
-                min_power_factor=min_pf,
-                max_power_factor=max_pf,
-                min_power_factor_time=min_entry.timestamp,
-                max_power_factor_time=max_entry.timestamp,
-                avg_power_factor=avg_pf,
-                total_kwh=total_kwh,
+                defaults=defaults,
             )
             generated_count += 1
 

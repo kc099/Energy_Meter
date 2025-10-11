@@ -4,7 +4,7 @@ from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Avg, Min, Max, Sum
+from django.db.models import Avg, Min, Max, Sum, Q
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -229,11 +229,17 @@ def _compose_simple_pdf(lines, repeat_from=None, repeat_length=0):
 
     return buffer.getvalue()
 
+def _device_access_q(user):
+    if getattr(user, 'is_superuser', False):
+        return Q()
+    return Q(device__device_owner=user) | Q(device__shared_with=user)
+
+
 def _meter_reading_rows(user, start_date, end_date, limit=None, offset=0, sort_key=None):
     order_by_field = READINGS_ORDER_MAP.get(sort_key, READINGS_ORDER_MAP[READINGS_SORT_DEFAULT])
     queryset = (
         DeviceData.objects.filter(
-            device__device_owner=user,
+            _device_access_q(user),
             timestamp__date__range=(start_date, end_date),
         )
         .select_related('device')
@@ -268,7 +274,7 @@ def _minmax_summary_rows(user, start_date, end_date, limit=None, offset=0, sort_
     order_fields = MINMAX_ORDER_MAP.get(sort_key, MINMAX_ORDER_MAP[MINMAX_SORT_DEFAULT])
     queryset = (
         ShiftReport.objects.filter(
-            device__device_owner=user,
+            _device_access_q(user),
             date__range=(start_date, end_date),
         )
         .values('date', 'shift__name', 'shift__start_time')
@@ -437,7 +443,9 @@ def _build_report_response(user, dataset_key, export_format, start_date, end_dat
 
 @login_required
 def reports(request):
-    minmax_stats = ShiftReport.objects.filter(device__device_owner=request.user).aggregate(
+    minmax_stats = ShiftReport.objects.filter(
+        _device_access_q(request.user)
+    ).aggregate(
         overall_min=Min('min_power_factor'),
         overall_max=Max('max_power_factor'),
     )

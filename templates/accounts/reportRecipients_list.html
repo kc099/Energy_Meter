@@ -75,6 +75,7 @@
                                     <th>Daily</th>
                                     <th>Shift</th>
                                     <th>Shifts Selected</th>
+                                    <th>Status</th>
                                     <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
@@ -97,6 +98,15 @@
                                                 {% endif %}
                                             {% else %}
                                                 <span class="text-muted">Not applicable</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if recipient.last_success_at %}
+                                                <span class="badge bg-success">Sent {{ recipient.last_success_at|timesince }} ago</span>
+                                            {% elif recipient.last_failure_at %}
+                                                <span class="badge bg-danger" title="{{ recipient.last_failure_message }}">Failed {{ recipient.last_failure_at|timesince }} ago</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Not yet sent</span>
                                             {% endif %}
                                         </td>
                                         <td class="text-end">
