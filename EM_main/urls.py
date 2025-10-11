@@ -27,4 +27,5 @@ urlpatterns = [
     path("devices/", include("devices.urls")),
     path("api/", include("api.urls")),
     path("gateway/", include("device_gateway.urls", namespace="device-gateway")),
+    path("api/v1/", include("api_frontend.urls"))
 ]
