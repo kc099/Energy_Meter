@@ -9,7 +9,8 @@ import requests
 import json
 import secrets
 import hashlib
-from .fields import EncryptedJSONField
+import uuid
+from .fields import EncryptedJSONField, EncryptedCharField
 
 class Shift(models.Model):
     name = models.CharField(max_length=50)  # e.g., "Morning Shift", "Night Shift"
@@ -125,11 +126,18 @@ class Device(models.Model):
     ]
 
     device_type = models.CharField(max_length=50, choices=DEVICE_TYPE_CHOICES)
+    duid = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        null=True,  # Temporarily allow null for migration
+        help_text="Device universal identifier used for cross-system correlation",
+    )
     device_owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='devices')
     located_at = models.CharField(max_length=100)
-    device_address = models.CharField(max_length=200, help_text="Device IP address or API endpoint URL")
+    device_address = EncryptedCharField(max_length=500, help_text="Device IP address or API endpoint URL (encrypted)")
     address_type = models.CharField(max_length=3, choices=ADDRESS_TYPE_CHOICES, default='ip')
-    latest_value = models.JSONField(null=True, blank=True, help_text="Latest data received from device")
+    latest_value = EncryptedJSONField(null=True, blank=True, help_text="Latest data received from device (encrypted)")
     last_updated = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
     device_secret = EncryptedJSONField(
