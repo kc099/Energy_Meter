@@ -1,6 +1,57 @@
-from django.shortcuts import render
+import json
+
+from django.contrib import messages
+from django.core.serializers.json import DjangoJSONEncoder
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from .models import Station, ShiftData, ShiftConfig
+
+from .forms import StationForm
+from .models import ShiftConfig, ShiftData, Station
+
+
+def station_add(request):
+    # Bind POST data when available so users see their input + validation errors on failure.
+    form = StationForm(request.POST or None)
+
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        # Redirect after success so page refreshes don't resubmit the form (PRG pattern).
+        messages.success(request, "Station created.")
+        return redirect("andon:station_list")
+
+    # Initial GET or invalid POST falls through to the same template with the bound form.
+    return render(request, "andon/station_form.html", {"form": form})
+def station_list(request):
+    stations = Station.objects.order_by("name")
+    return render(request, "andon/station_list.html", {"stations": stations})
+def station_detail(request, pk):
+    station = get_object_or_404(Station, pk=pk)
+    recent_shift = ( shiftData.objects.filter(station=station).order_by("-date", "-id").first())
+    return render(
+        request,
+        "andon/station_detail.html",
+        {
+            "station": station,
+            "recent_shift": recent_shift,
+        },
+    )
+def station_edit(request,pk):
+    station = get_object_or_404(Station,pk=pk)
+    form = stationform(request.POST or None, intance=station)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Station updated.")
+        return redirect("andon:station_detail", pk=station.pk)
+    return render(request, "andon/station_form.html", {"form": form, "station": station})
+def station_delete(request, pk):
+    station = get_object_or_404(Station, pk=pk)
+
+    if request.method == "POST":
+        station.delete()
+        messages.success(request, "Station deleted.")
+        return redirect("andon:station_list")
+
+    return render(request, "andon/station_confirm_delete.html", {"station": station})       
 
 def dashboard(request):
     cfg = ShiftConfig.objects.first()
@@ -34,6 +85,8 @@ def dashboard(request):
     context = {
         "stations": station_cards,   # list of cards to slide through
         "left_logo_url": "/static/JBM.PNG",      # use your real static paths
-        "right_logo_url": "/static/OGIHARA1.PNG"
+        "right_logo_url": "/static/OGIHARA1.PNG",
+        # Serialize once so the template can feed the JS carousel without manual string building.
+        "stations_json": json.dumps(station_cards, cls=DjangoJSONEncoder),
     }
     return render(request, "andon/dashboard.html", context)

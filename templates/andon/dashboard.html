@@ -114,6 +114,8 @@
 {% endblock %}
 
 {% block extra_js %}
+
+{{ stations_json|json_script:"stations-data" }}
 <script>
 (function(){
   // live clock
@@ -125,7 +127,8 @@
   tick(); setInterval(tick, 1000);
 
   // stations is passed from the view; ensure it's JSON-safe there if needed
-  const stations = {{ stations|safe }};
+  
+  const stations = JSON.parse(document.getElementById('stations-data').textContent);
   let idx = 0;
 
   const el = (id)=>document.getElementById(id);

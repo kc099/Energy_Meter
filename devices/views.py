@@ -1,6 +1,7 @@
 import logging
 import json
 import csv
+import re
 from datetime import datetime, timedelta, time
 
 # Celery is optional for local/testing environments
@@ -42,6 +43,55 @@ from .tasks import poll_device_task
 from andon.models import Station, ShiftData, SectionData
 
 logger = logging.getLogger(__name__)
+
+
+_NUMERIC_PATTERN = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+
+
+def _coerce_float(value):
+    """Best-effort conversion of telemetry values to float."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            return float(candidate)
+        except ValueError:
+            match = _NUMERIC_PATTERN.search(candidate)
+            if match:
+                try:
+                    return float(match.group(0))
+                except ValueError:
+                    return None
+    return None
+
+
+def _extract_numeric(payload: dict, primary_keys: tuple[str, ...], *, fuzzy: tuple[str, ...] = ()):
+    """Pull the first numeric value from telemetry payload matching known keys."""
+    if not isinstance(payload, dict):
+        return None
+
+    for key in primary_keys:
+        if key in payload:
+            coerced = _coerce_float(payload.get(key))
+            if coerced is not None:
+                return coerced
+
+    if not fuzzy:
+        return None
+
+    for key, value in payload.items():
+        lowered = key.lower()
+        if any(token in lowered for token in fuzzy):
+            coerced = _coerce_float(value)
+            if coerced is not None:
+                return coerced
+
+    return None
 
 
 def _get_device_role(device: Device, user) -> str | None:
@@ -155,17 +205,33 @@ def generate_shift_reports_for_date(target_date):
             voltage_samples: list[tuple[DeviceData, float]] = []
             for entry, payload in samples:
                 try:
-                    pf_samples.append((entry, float(payload.get("power_factor"))))
-                except (TypeError, ValueError):
+                    pf_value = _extract_numeric(
+                        payload,
+                        ("power_factor", "pf", "powerfactor"),
+                        fuzzy=("pf", "powerfactor"),
+                    )
+                    if pf_value is None:
+                        raise ValueError
+                    pf_samples.append((entry, pf_value))
+                except ValueError:
                     continue
-                try:
-                    current_samples.append((entry, float(payload.get("current"))))
-                except (TypeError, ValueError):
-                    pass
-                try:
-                    voltage_samples.append((entry, float(payload.get("voltage"))))
-                except (TypeError, ValueError):
-                    pass
+
+                current_value = _extract_numeric(
+                    payload,
+                    ("current", "current_a"),
+                    fuzzy=("current", "amp", "irms"),
+                )
+                if current_value is not None:
+                    current_samples.append((entry, current_value))
+
+                voltage_value = _extract_numeric(
+                    payload,
+                    ("voltage", "voltage_v"),
+                    fuzzy=("voltage", "volt", "vrms"),
+                )
+                if voltage_value is not None:
+                    voltage_samples.append((entry, voltage_value))
+
             if not pf_samples:
                 continue
 
@@ -189,9 +255,12 @@ def generate_shift_reports_for_date(target_date):
 
             start_kwh = end_kwh = None
             for _, payload in samples:
-                try:
-                    kwh_value = float(payload.get("kwh"))
-                except (TypeError, ValueError):
+                kwh_value = _extract_numeric(
+                    payload,
+                    ("kwh",),
+                    fuzzy=("kwh", "energy", "wh"),
+                )
+                if kwh_value is None:
                     continue
                 if start_kwh is None:
                     start_kwh = kwh_value
@@ -217,7 +286,7 @@ def generate_shift_reports_for_date(target_date):
                 'avg_voltage': avg_voltage,
                 'min_voltage_time': min_voltage_entry.timestamp if min_voltage_entry else None,
                 'max_voltage_time': max_voltage_entry.timestamp if max_voltage_entry else None,
-                'data_points': len(samples),
+                'data_points': len(pf_samples),
             }
 
             _, _ = ShiftReport.objects.update_or_create(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
+import logging
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
@@ -15,6 +17,9 @@ from django.views.decorators.http import require_http_methods
 from .auth import bearer_required
 from .models import Device, DeviceProvisioningToken, DeviceTelemetry
 from devices.models import Device as PortalDevice
+
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_json_body(request):
@@ -96,10 +101,16 @@ def claim_device_view(request):
     ingest_path = reverse("device-gateway:telemetry-ingest")
     ingest_url = request.build_absolute_uri(ingest_path)
 
+    # Get the device UUID (duid) from the linked portal device
+    device_uuid = None
+    if device.source_device and device.source_device.duid:
+        device_uuid = str(device.source_device.duid)
+
     return JsonResponse(
         {
             "device_id": device.id,
             "api_key": api_key,
+            "device_uuid": device_uuid,
             "ingest_url": ingest_url,
             "token_expires_at": candidate.expires_at.isoformat() if candidate.expires_at else None,
         },
@@ -122,12 +133,81 @@ def telemetry_ingest_view(request):
         return JsonResponse({"message": "Payload must be a JSON object."}, status=400)
 
     device: Device = request.device
+    logger.info("Telemetry ingest device=%s payload=%s", device.id, payload)
+    print("[Telemetry] device=%s payload=%s" % (device.id, json.dumps(payload)))
     DeviceTelemetry.objects.create(device=device, payload=payload)
     device.latest_payload = payload
     device.last_seen = timezone.now()
     device.save(update_fields=["latest_payload", "last_seen"])
 
     return JsonResponse({"status": "ok"}, status=201)
+
+
+@csrf_exempt
+@bearer_required
+@require_http_methods(["POST"])
+def telemetry_ingest_test_view(request):
+    """TEST ENDPOINT: Receive UUID + data array, validate UUID, and print to console."""
+
+    try:
+        payload = _parse_json_body(request)
+    except ValueError as exc:
+        return JsonResponse({"message": str(exc)}, status=400)
+
+    # Print raw received data to console
+    print("=" * 80)
+    print("TEST ENDPOINT: Received data from client")
+    print("=" * 80)
+    print(f"Full payload: {json.dumps(payload, indent=2)}")
+
+    # Extract UUID and data array
+    device_uuid = payload.get("uuid")
+    data_array = payload.get("data")
+
+    if not device_uuid:
+        print("ERROR: No UUID provided in payload")
+        return JsonResponse({"message": "UUID is required"}, status=400)
+
+    if not isinstance(data_array, list) or len(data_array) != 7:
+        print(f"ERROR: Invalid data array. Expected 7 fields, got {len(data_array) if isinstance(data_array, list) else 'not a list'}")
+        return JsonResponse({"message": "data must be an array of 7 values"}, status=400)
+
+    print(f"UUID: {device_uuid}")
+    print(f"Data array: {data_array}")
+
+    # Validate UUID exists in PortalDevice (devices.Device model)
+    from devices.models import Device as PortalDevice
+    try:
+        portal_device = PortalDevice.objects.get(duid=device_uuid)
+        print(f"✓ UUID VALIDATED: Found device '{portal_device}' (ID: {portal_device.id})")
+        print(f"  Owner: {portal_device.device_owner}")
+        print(f"  Location: {portal_device.located_at}")
+
+        # Store telemetry in gateway
+        device: Device = request.device
+        DeviceTelemetry.objects.create(device=device, payload=payload)
+        device.latest_payload = payload
+        device.last_seen = timezone.now()
+        device.save(update_fields=["latest_payload", "last_seen"])
+
+        print(f"✓ DATA SAVED to gateway device {device.id}")
+        print("=" * 80)
+
+        return JsonResponse({
+            "status": "ok",
+            "message": "UUID validated and data saved",
+            "matched_device_id": portal_device.id,
+            "matched_device": str(portal_device)
+        }, status=201)
+
+    except PortalDevice.DoesNotExist:
+        print(f"✗ UUID NOT FOUND: {device_uuid} does not exist in database")
+        print("  Data will NOT be saved")
+        print("=" * 80)
+        return JsonResponse({
+            "status": "rejected",
+            "message": "UUID not found in database. Data not saved."
+        }, status=403)
 
 
 @csrf_exempt

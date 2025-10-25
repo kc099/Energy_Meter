@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Station{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h3 class="mb-3">{{ form.instance.pk|yesno:"Edit Andon Device,Add Andon Device" }}</h3>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {{ form.as_p }}
+      <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'andon:station_list' %}">Cancel</a>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+
+  {% extends "base.html" %}
+  {% block title %}{{ station.name }}{% endblock %}
+  {% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">{{ station.name }}</h2>
+    <div class="btn-group">
+      <a class="btn btn-outline-primary" href="{% url 'andon:station_edit' station.pk %}">Edit</a>
+      <a class="btn btn-outline-danger" href="{% url 'andon:station_delete' station.pk %}">Delete</a>
+      <a class="btn btn-outline-secondary" href="{% url 'andon:station_list' %}">Back to list</a>
+    </div>
+  </div>
+
+  <ul class="list-group mb-4">
+    <li class="list-group-item"><strong>IP:</strong> {{ station.ip_address }}</li>
+    <li class="list-group-item"><strong>Topic:</strong> {{ station.topic|default:"—" }}</li>
+    <li class="list-group-item"><strong>Plan Shift 1:</strong> {{ station.plan_shift1 }}</li>
+    <li class="list-group-item"><strong>Plan Shift 2:</strong> {{ station.plan_shift2 }}</li>
+    <li class="list-group-item"><strong>Plan Shift 3:</strong> {{ station.plan_shift3 }}</li>
+    <li class="list-group-item"><strong>Active:</strong> {{ station.is_active|yesno:"Yes,No" }}</li>
+    <li class="list-group-item"><strong>Alive:</strong> {{ station.is_alive|yesno:"Yes,No" }}</li>
+  </ul>
+
+  {% if recent_shift %}
+  <div class="card">
+    <div class="card-header">Most Recent Shift</div>
+    <div class="card-body">
+      <p><strong>Date:</strong> {{ recent_shift.date }}</p>
+      <p><strong>Shift:</strong> {{ recent_shift.shift }}</p>
+      <p><strong>Plan vs Actual:</strong> {{ recent_shift.plan }} / {{ recent_shift.actual }}</p>
+      <p><strong>Downtime:</strong> {{ recent_shift.downtime_min }} min</p>
+    </div>
+  </div>
+  {% endif %}
+  {% endblock %}

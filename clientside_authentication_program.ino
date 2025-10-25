@@ -42,15 +42,38 @@ const char *KEY_PROV_TOKEN = "provToken";
 
 String apiKey;
 
-void connectWifi() {
+const unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000; // 15 seconds
+
+bool connectWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+
+  Serial.printf("Connecting to Wi-Fi SSID: %s\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true, true);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED) {
+
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < WIFI_CONNECT_TIMEOUT_MS) {
     delay(500);
     Serial.print('.');
   }
-  Serial.println("\nWi-Fi connected");
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n==== Wi-Fi connected ====");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("Connecting to server: ");
+    Serial.print(API_HOST);
+    Serial.print(":");
+    Serial.println(API_PORT);
+    Serial.println("========================");
+    return true;
+  }
+
+  Serial.printf("\nWi-Fi connect failed (status=%d). Check SSID/password and ensure 2.4 GHz availability.\n", WiFi.status());
+  return false;
 }
 
 bool beginSecureClient() {
@@ -63,6 +86,10 @@ bool beginSecureClient() {
 bool postJson(const String &path, const String &body, const String &bearer, int &status, String &payload) {
   const char *scheme = USE_TLS ? "https://" : "http://";
   String url = String(scheme) + API_HOST + path;
+
+  Serial.printf("Attempting POST to: %s\n", url.c_str());
+  Serial.printf("Body: %s\n", body.c_str());
+
   bool began = false;
   if (USE_TLS) {
     began = http.begin(secureClient, API_HOST, API_PORT, path, true);
@@ -70,17 +97,26 @@ bool postJson(const String &path, const String &body, const String &bearer, int 
     began = http.begin(plainClient, API_HOST, API_PORT, path);
   }
   if (!began) {
-    Serial.println("HTTP begin failed");
+    Serial.println("ERROR: HTTP begin failed");
     return false;
   }
   http.addHeader("Content-Type", "application/json");
   if (bearer.length()) {
     http.addHeader("Authorization", "Bearer " + bearer);
+    Serial.println("Added Authorization header");
   }
+
   status = http.POST(body);
   payload = http.getString();
   http.end();
-  Serial.printf("POST %s -> %d\n", url.c_str(), status);
+
+  Serial.printf("Response status: %d\n", status);
+  Serial.printf("Response payload: %s\n", payload.c_str());
+
+  if (status < 0) {
+    Serial.printf("HTTPClient error: %s\n", HTTPClient::errorToString(status).c_str());
+  }
+
   return true;
 }
 
@@ -127,11 +163,17 @@ bool sendTelemetry() {
     return false;
   }
 
+  // Generate random data for testing
+  float voltage = random(2200, 2400) / 10.0;      // 220.0 - 240.0 V
+  float current = random(10, 200) / 10.0;         // 1.0 - 20.0 A
+  float power_factor = random(800, 1000) / 1000.0; // 0.800 - 1.000
+  float kwh = random(10000, 20000) / 10.0;        // 1000.0 - 2000.0 kWh
+
   StaticJsonDocument<256> doc;
-  doc["voltage"] = 228.4;
-  doc["current"] = 3.2;
-  doc["power_factor"] = 0.97;
-  doc["kwh"] = 1234.5;
+  doc["voltage"] = voltage;
+  doc["current"] = current;
+  doc["power_factor"] = power_factor;
+  doc["kwh"] = kwh;
 
   String body;
   serializeJson(doc, body);
@@ -150,7 +192,8 @@ bool sendTelemetry() {
   }
 
   if (status >= 200 && status < 300) {
-    Serial.println("Telemetry sent.");
+    Serial.printf("Telemetry sent: V=%.1f, I=%.1f, PF=%.3f, kWh=%.1f\n",
+                  voltage, current, power_factor, kwh);
     return true;
   }
 
@@ -176,7 +219,9 @@ void setup() {
   apiKey = prefs.getString(KEY_API_TOKEN, "");
   provisioningToken = prefs.getString(KEY_PROV_TOKEN, provisioningToken);
 
-  connectWifi();
+  if (!connectWifi()) {
+    Serial.println("Unable to join Wi-Fi. Re-check credentials via Serial monitor.");
+  }
   beginSecureClient();
 
   if (apiKey.isEmpty()) {
@@ -189,13 +234,16 @@ void setup() {
 }
 
 unsigned long lastTelemetry = 0;
-const unsigned long TELEMETRY_INTERVAL_MS = 60 * 1000;
+const unsigned long TELEMETRY_INTERVAL_MS = 20; // Send every 20ms (50 times per second)
 
 void loop() {
   readTokenFromSerial();
 
   if (WiFi.status() != WL_CONNECTED) {
-    connectWifi();
+    if (!connectWifi()) {
+      delay(2000);
+      return;
+    }
   }
 
   if (apiKey.isEmpty() && !provisioningToken.isEmpty()) {
@@ -203,8 +251,13 @@ void loop() {
   }
 
   unsigned long now = millis();
-  if (now - lastTelemetry > TELEMETRY_INTERVAL_MS) {
+  if (now - lastTelemetry >= TELEMETRY_INTERVAL_MS) {
     lastTelemetry = now;
-    sendTelemetry();
+    if (sendTelemetry()) {
+      // Successfully sent data
+    } else {
+      // Failed to send, wait a bit longer before retrying
+      delay(1000);
+    }
   }
 }

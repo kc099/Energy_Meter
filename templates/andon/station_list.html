@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+  {% block title %}Andon Devices{% endblock %}
+  {% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">Andon Devices ({{ total }})</h2>
+    <a class="btn btn-primary" href="{% url 'andon:station_add' %}">+ Add Device</a>
+  </div>
+
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>IP</th>
+        <th>Status</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for station in stations %}
+      <tr>
+        <td><a href="{% url 'andon:station_detail' station.pk %}">{{ station.name }}</a></td>
+        <td>{{ station.ip_address }}</td>
+        <td>
+          {% if station.is_active %}<span class="badge bg-success">Active{% else %}<span class="badge bg-secondary">Disabled{% endif %}
+          {% if not station.is_alive %}<span class="badge bg-warning text-dark ms-1">Offline</span>{% endif %}
+        </td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary" href="{% url 'andon:station_edit' station.pk %}">Edit</a>
+          <a class="btn btn-sm btn-outline-danger" href="{% url 'andon:station_delete' station.pk %}">Delete</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="text-center text-muted">No devices yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endblock %}
