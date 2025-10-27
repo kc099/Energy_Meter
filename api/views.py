@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict
 
@@ -20,6 +22,7 @@ from devices.forms import DeviceForm
 from devices.models import Device, DeviceData, DeviceProvisioningToken, Shift, ShiftReport
 from devices.tasks import poll_device_task
 from devices.views import generate_shift_reports_for_date
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .serializers import (
     serialize_device,
@@ -59,6 +62,30 @@ def _form_error_messages(form):
     for field, messages in form.errors.get_json_data().items():
         errors[field] = [item.get("message") for item in messages]
     return errors
+
+
+def _decrypt_device_payload(device: Device, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return plaintext telemetry, transparently handling AES-GCM envelopes."""
+
+    if not isinstance(payload, dict):
+        return payload
+
+    if payload.get("algorithm") != "AESGCM":
+        return payload
+
+    required_fields = {"nonce", "ciphertext"}
+    if not required_fields.issubset(payload):
+        missing = ", ".join(sorted(required_fields - set(payload)))
+        raise ValueError(f"Encrypted payload missing fields: {missing}")
+
+    key_bytes = device.get_encryption_key_bytes()
+    try:
+        nonce = base64.b64decode(payload["nonce"])
+        ciphertext = base64.b64decode(payload["ciphertext"])
+        plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, None)
+        return json.loads(plaintext.decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("Unable to decrypt telemetry payload") from exc
 
 
 @allow_cors
@@ -507,6 +534,7 @@ def device_claim_view(request):
 
     device = candidate.device
     api_key = device.issue_api_secret()
+    encryption_key_b64 = device.get_or_create_encryption_key()
     device.last_updated = timezone.now()
     device.save(update_fields=["last_updated"])
 
@@ -523,6 +551,7 @@ def device_claim_view(request):
     response_payload = {
         "device_id": device.id,
         "api_key": api_key,
+        "encryption_key_b64": encryption_key_b64,
         "ingest_url": ingest_url,
         "token_expires_at": (
             timezone.localtime(candidate.expires_at).isoformat()
@@ -557,6 +586,11 @@ def device_data_ingest_view(request):
             {"message": "Unable to determine device context."},
             status=400,
         )
+
+    try:
+        payload = _decrypt_device_payload(device, payload)
+    except ValueError as exc:
+        return cors_json_response(request, {"message": str(exc)}, status=400)
 
     DeviceData.objects.create(device=device, value=payload)
     device.latest_value = payload

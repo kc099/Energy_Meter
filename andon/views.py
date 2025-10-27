@@ -10,23 +10,28 @@ from .models import ShiftConfig, ShiftData, Station
 
 
 def station_add(request):
-    # Bind POST data when available so users see their input + validation errors on failure.
+    """Create a new Andon station."""
+
     form = StationForm(request.POST or None)
 
     if request.method == "POST" and form.is_valid():
         form.save()
-        # Redirect after success so page refreshes don't resubmit the form (PRG pattern).
         messages.success(request, "Station created.")
         return redirect("andon:station_list")
 
-    # Initial GET or invalid POST falls through to the same template with the bound form.
     return render(request, "andon/station_form.html", {"form": form})
+
+
 def station_list(request):
     stations = Station.objects.order_by("name")
     return render(request, "andon/station_list.html", {"stations": stations})
+
+
 def station_detail(request, pk):
     station = get_object_or_404(Station, pk=pk)
-    recent_shift = ( shiftData.objects.filter(station=station).order_by("-date", "-id").first())
+    recent_shift = (
+        ShiftData.objects.filter(station=station).order_by("-date", "-id").first()
+    )
     return render(
         request,
         "andon/station_detail.html",
@@ -35,14 +40,27 @@ def station_detail(request, pk):
             "recent_shift": recent_shift,
         },
     )
-def station_edit(request,pk):
-    station = get_object_or_404(Station,pk=pk)
-    form = stationform(request.POST or None, intance=station)
+
+
+def station_edit(request, pk):
+    """Update an existing station."""
+
+    station = get_object_or_404(Station, pk=pk)
+    form = StationForm(request.POST or None, instance=station)
+
     if request.method == "POST" and form.is_valid():
         form.save()
         messages.success(request, "Station updated.")
         return redirect("andon:station_detail", pk=station.pk)
-    return render(request, "andon/station_form.html", {"form": form, "station": station})
+
+    return render(
+        request,
+        "andon/station_form.html",
+        {
+            "form": form,
+            "station": station,
+        },
+    )
 def station_delete(request, pk):
     station = get_object_or_404(Station, pk=pk)
 

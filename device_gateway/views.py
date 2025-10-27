@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
-from datetime import timedelta
-
 import logging
+import secrets
+from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -13,6 +14,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .auth import bearer_required
 from .models import Device, DeviceProvisioningToken, DeviceTelemetry
@@ -27,6 +30,54 @@ def _parse_json_body(request):
         return json.loads(request.body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Invalid JSON body") from exc
+
+
+def _decrypt_gateway_payload(device: Device, payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return payload
+    if payload.get("algorithm") != "AESGCM":
+        return payload
+    missing = {"nonce", "ciphertext"} - set(payload)
+    if missing:
+        raise ValueError(f"Encrypted payload missing fields: {', '.join(sorted(missing))}")
+    try:
+        nonce = base64.b64decode(payload["nonce"])
+        ciphertext = base64.b64decode(payload["ciphertext"])
+        key_bytes = device.get_encryption_key_bytes()
+        plaintext = AESGCM(key_bytes).decrypt(nonce, ciphertext, None)
+        return json.loads(plaintext.decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("Unable to decrypt telemetry payload") from exc
+
+
+def _encrypt_value_for_logging(device: Device, value) -> str:
+    """Encrypt arbitrary JSON-serialisable value for logging."""
+
+    try:
+        key_bytes = device.get_encryption_key_bytes()
+        nonce = secrets.token_bytes(12)
+        serialized = json.dumps(value, default=str).encode("utf-8")
+        ciphertext = AESGCM(key_bytes).encrypt(nonce, serialized, None)
+        return base64.b64encode(nonce + ciphertext).decode("ascii")
+    except Exception as exc:  # pragma: no cover - safeguard for logging only
+        logger.warning("Failed to encrypt value for logging: %s", exc)
+        return "<unable to encrypt>"
+
+
+def _log_bundle(device: Device, payload) -> str:
+    """Return logging structure with encrypted uid and payload."""
+
+    uid = None
+    if device.source_device and device.source_device.duid:
+        uid = str(device.source_device.duid)
+    else:
+        uid = str(device.id)
+
+    bundle = {
+        "uid": _encrypt_value_for_logging(device, uid),
+        "payload": _encrypt_value_for_logging(device, payload),
+    }
+    return json.dumps(bundle)
 
 
 @csrf_exempt
@@ -90,6 +141,7 @@ def claim_device_view(request):
 
     device = candidate.device
     api_key = device.issue_api_secret()
+    encryption_key_b64 = device.get_or_create_encryption_key()
 
     candidate.update_metadata(
         claimed_from_ip=request.META.get("REMOTE_ADDR"),
@@ -110,6 +162,7 @@ def claim_device_view(request):
         {
             "device_id": device.id,
             "api_key": api_key,
+            "encryption_key_b64": encryption_key_b64,
             "device_uuid": device_uuid,
             "ingest_url": ingest_url,
             "token_expires_at": candidate.expires_at.isoformat() if candidate.expires_at else None,
@@ -133,8 +186,14 @@ def telemetry_ingest_view(request):
         return JsonResponse({"message": "Payload must be a JSON object."}, status=400)
 
     device: Device = request.device
-    logger.info("Telemetry ingest device=%s payload=%s", device.id, payload)
-    print("[Telemetry] device=%s payload=%s" % (device.id, json.dumps(payload)))
+    log_snapshot = _log_bundle(device, payload)
+    logger.info("Telemetry ingest bundle=%s", log_snapshot)
+    print(f"[Telemetry] {log_snapshot}")
+    try:
+        payload = _decrypt_gateway_payload(device, payload)
+    except ValueError as exc:
+        return JsonResponse({"message": str(exc)}, status=400)
+
     DeviceTelemetry.objects.create(device=device, payload=payload)
     device.latest_payload = payload
     device.last_seen = timezone.now()

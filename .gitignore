@@ -117,3 +117,4 @@ env/
 .idea/
 .vscode/
 *.code-workspace
+device_client_state.json

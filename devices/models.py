@@ -5,12 +5,18 @@ from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.core.exceptions import ValidationError
 from datetime import timedelta
+import base64
+import logging
 import requests
 import json
 import secrets
 import hashlib
 import uuid
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .fields import EncryptedJSONField, EncryptedCharField
+
+
+logger = logging.getLogger(__name__)
 
 class Shift(models.Model):
     name = models.CharField(max_length=50)  # e.g., "Morning Shift", "Night Shift"
@@ -115,8 +121,7 @@ class Device(models.Model):
 
     DEVICE_TYPE_CHOICES = [
         ('meter', 'Energy Meter'),
-        ('sensor', 'Sensor'),
-        ('monitor', 'Power Monitor'),
+        ('gas_monitor', 'Gas Monitor'),
         ('andon', 'Andon Station'),
     ]
 
@@ -151,6 +156,12 @@ class Device(models.Model):
         blank=True,
         editable=False,
         help_text="SHA-256 hash of the active device credential",
+    )
+    encryption_key_b64 = EncryptedCharField(
+        max_length=256,
+        null=True,
+        blank=True,
+        help_text="Base64 encoded AES key issued to the device",
     )
     provisioning_state = models.CharField(
         max_length=20,
@@ -226,6 +237,19 @@ class Device(models.Model):
         self.save(update_fields=['device_secret', 'device_secret_hash', 'provisioning_state', 'is_active'])
         return secret
 
+    def get_or_create_encryption_key(self) -> str:
+        """Return the device AES key, generating and persisting it when missing."""
+        if not self.encryption_key_b64:
+            key_bytes = secrets.token_bytes(32)
+            self.encryption_key_b64 = base64.b64encode(key_bytes).decode('ascii')
+            self.save(update_fields=['encryption_key_b64'])
+        return self.encryption_key_b64
+
+    def get_encryption_key_bytes(self) -> bytes:
+        """Return the AES key in bytes, ensuring it exists."""
+        key_b64 = self.get_or_create_encryption_key()
+        return base64.b64decode(key_b64)
+
     def clear_api_secret(self):
         """Remove the stored API credential."""
         self.device_secret = None
@@ -248,41 +272,41 @@ class Device(models.Model):
         """
         Poll the device for new data
         """
-        print(f"Starting to poll device at URL: {self.device_address}")  # Debug print
+        logger.warning(
+            "Starting to poll device uid=%s url=%s", self.id, self.device_address
+        )
         try:
             # Prepare URL
             url = self.device_address
             if not url.startswith(('http://', 'https://')):
                 url = f"http://{url}"
-            print(f"Requesting data from: {url}")  # Debug print
+            logger.warning("Requesting device data uid=%s url=%s", self.id, url)
 
             # Make request with longer timeout
             response = requests.get(url, timeout=10)
-            print(f"Response status code: {response.status_code}")  # Debug print
-            print(f"Response content: {response.text}")  # Debug print
+            logger.warning("Device response status uid=%s status=%s", self.id, response.status_code)
+            logger.warning("Device response bundle=%s", self._log_bundle_for_log(response.text))
             response.raise_for_status()
             
             # Try parsing response data
             try:
                 data = response.json()
-                print(f"Parsed JSON data: {data}")  # Debug print
+                logger.warning("Parsed JSON bundle=%s", self._log_bundle_for_log(data))
             except json.JSONDecodeError as e:
-                print(f"Not JSON data, using raw text: {response.text}")  # Debug print
+                logger.warning("Response not JSON uid=%s", self.id)
                 data = response.text.strip()
             
             # Handle different response formats
             formatted_data = None
             if isinstance(data, dict):
-                print("Data is already in dictionary format")  # Debug print
                 formatted_data = data
             else:
-                print(f"Attempting to format data: {data}")  # Debug print
                 formatted_data = self.format_reading(data)
                 
             if not formatted_data:
                 raise ValueError(f"Could not format data: {data}")
 
-            print(f"Successfully formatted data: {formatted_data}")  # Debug print
+            logger.warning("Formatted reading bundle=%s", self._log_bundle_for_log(formatted_data))
             
             # Update device state
             self.latest_value = formatted_data
@@ -293,24 +317,47 @@ class Device(models.Model):
             # Store in historical data
             DeviceData.objects.create(device=self, value=formatted_data)
             
-            print("Successfully updated device and stored historical data")  # Debug print
+            logger.warning("Successfully stored device data uid=%s", self.id)
             return True, formatted_data
             
         except requests.exceptions.RequestException as e:
-            print(f"Request error: {str(e)}")  # Debug print
+            logger.warning("Request error uid=%s error=%s", self.id, e)
             self.is_active = False
             self.save()
             return False, f"Connection error: {str(e)}"
         except json.JSONDecodeError as e:
-            print(f"JSON parsing error: {str(e)}")  # Debug print
+            logger.warning("JSON parsing error uid=%s error=%s", self.id, e)
             self.is_active = False
             self.save()
             return False, f"Data format error: {str(e)}"
         except Exception as e:
-            print(f"Unexpected error: {str(e)}")  # Debug print
+            logger.warning("Unexpected error uid=%s error=%s", self.id, e)
             self.is_active = False
             self.save()
             return False, str(e)
+
+    def _encrypt_value_for_log(self, value) -> str:
+        """Encrypt a JSON-serialisable value with the device AES key."""
+
+        key_bytes = self.get_encryption_key_bytes()
+        nonce = secrets.token_bytes(12)
+        serialized = json.dumps(value, default=str).encode("utf-8")
+        ciphertext = AESGCM(key_bytes).encrypt(nonce, serialized, None)
+        return base64.b64encode(nonce + ciphertext).decode("ascii")
+
+    def _log_bundle_for_log(self, payload) -> str:
+        """Return logging structure with encrypted uid and payload."""
+
+        try:
+            uid = str(self.duid or self.id)
+            bundle = {
+                "uid": self._encrypt_value_for_log(uid),
+                "payload": self._encrypt_value_for_log(payload),
+            }
+            return json.dumps(bundle)
+        except Exception as exc:  # pragma: no cover - logging safeguard
+            logger.warning("Failed to build log bundle uid=%s error=%s", self.id, exc)
+            return json.dumps({"uid": "<unable>", "payload": "<unable>"})
 
     def has_active_provisioning_window(self) -> bool:
         """Return True if there is an unexpired provisioning token for this device."""

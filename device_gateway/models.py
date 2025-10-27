@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import secrets
 from datetime import timedelta
@@ -44,6 +45,12 @@ class Device(models.Model):
         editable=False,
         help_text="SHA-256 hash of the active device credential.",
     )
+    encryption_key_b64 = models.CharField(
+        max_length=256,
+        null=True,
+        blank=True,
+        help_text="Base64 encoded AES key shared with the device.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -70,6 +77,18 @@ class Device(models.Model):
         self.last_seen = timezone.now()
         self.save(update_fields=["device_secret", "device_secret_hash", "last_seen"])
         return token
+
+    def get_or_create_encryption_key(self) -> str:
+        """Ensure the device has an AES key and return it as Base64."""
+        if not self.encryption_key_b64:
+            key_bytes = secrets.token_bytes(32)
+            self.encryption_key_b64 = base64.b64encode(key_bytes).decode("ascii")
+            self.save(update_fields=["encryption_key_b64"])
+        return self.encryption_key_b64
+
+    def get_encryption_key_bytes(self) -> bytes:
+        key_b64 = self.get_or_create_encryption_key()
+        return base64.b64decode(key_b64)
 
     def clear_api_secret(self) -> None:
         self.device_secret = None

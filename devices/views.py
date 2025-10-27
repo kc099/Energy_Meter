@@ -435,6 +435,42 @@ def device_config_detail(request, device_id):
 
     return JsonResponse({'device': payload})
 
+
+@login_required
+@require_POST
+def device_token_detail(request, device_id):
+    device = get_object_or_404(
+        Device.objects.prefetch_related('device_shares__user'), id=device_id
+    )
+    role = _get_device_role(device, request.user)
+    if role not in {
+        DeviceShare.AccessLevel.INSPECTOR,
+        DeviceShare.AccessLevel.MANAGER,
+    }:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+
+    password = (request.POST.get('password') or '').strip()
+    if not password:
+        return JsonResponse({'error': 'Password is required.'}, status=400)
+    if not request.user.check_password(password):
+        return JsonResponse({'error': 'Password verification failed.'}, status=403)
+
+    token_value = device.device_secret
+    if not token_value:
+        return JsonResponse({'error': 'No active device credential found.'}, status=404)
+
+    if isinstance(token_value, (dict, list)):
+        token_value = json.dumps(token_value)
+
+    response_payload = {
+        'token': str(token_value),
+        'encryption_key_b64': device.encryption_key_b64 or '',
+        'updated_at': timezone.localtime(device.last_updated).isoformat()
+        if device.last_updated
+        else None,
+    }
+    return JsonResponse(response_payload)
+
 @login_required
 def add_device(request):
     if request.method == 'POST':
@@ -756,6 +792,7 @@ def device_provisioning(request, device_id):
 
     claim_url = request.build_absolute_uri(reverse('api:device-claim'))
     ingest_url = request.build_absolute_uri(reverse('api:device-data-ingest'))
+    token_detail_url = reverse('devices:device_token_detail', args=[device.id])
 
     context = {
         'device': device,
@@ -767,6 +804,7 @@ def device_provisioning(request, device_id):
         'provisioning_state': device.provisioning_state,
         'claim_url': claim_url,
         'ingest_url': ingest_url,
+        'token_detail_url': token_detail_url,
     }
     return render(request, 'devices/device_provision.html', context)
 
