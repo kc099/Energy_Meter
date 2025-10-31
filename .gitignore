@@ -118,3 +118,4 @@ env/
 .vscode/
 *.code-workspace
 device_client_state.json
+client_programs/*_state.json

@@ -20,6 +20,8 @@ from django.urls import reverse
 from accounts.models import User
 from devices.forms import DeviceForm
 from devices.models import Device, DeviceData, DeviceProvisioningToken, Shift, ShiftReport
+from gas_monitor.models import GasMonitorDevice
+from andon.models import Station
 from devices.tasks import poll_device_task
 from devices.views import generate_shift_reports_for_date
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -86,6 +88,80 @@ def _decrypt_device_payload(device: Device, payload: Dict[str, Any]) -> Dict[str
         return json.loads(plaintext.decode("utf-8"))
     except Exception as exc:
         raise ValueError("Unable to decrypt telemetry payload") from exc
+
+
+def _normalize_station_key(address: str | None) -> str | None:
+    if not address:
+        return None
+    candidate = address.strip()
+    if not candidate:
+        return None
+    if "://" in candidate:
+        candidate = candidate.split("://", 1)[1]
+    head = candidate.split("/", 1)[0]
+    if not head:
+        return None
+    if ":" in head:
+        head = head.split(":", 1)[0]
+    return head.strip() or None
+
+
+def _ensure_station_for_device(device: Device, metadata: Dict[str, Any] | None) -> Station | None:
+    """Return an existing Station or create one using device details when necessary."""
+
+    station_id_hint = None
+    if isinstance(metadata, dict):
+        station_id_hint = metadata.get("andon_station_id") or metadata.get("station_id")
+    if station_id_hint:
+        try:
+            station = Station.objects.filter(id=int(station_id_hint)).first()
+            if station:
+                return station
+        except (TypeError, ValueError):  # pragma: no cover - defensive parse
+            pass
+
+    normalized = _normalize_station_key(device.device_address)
+    if normalized:
+        station = Station.objects.filter(ip_address__iexact=normalized).first()
+        if station:
+            return station
+
+    if not normalized:
+        return None
+
+    base_name = (device.located_at or "").strip() or f"Andon Station {device.id}"
+    station_name = base_name
+    suffix = 1
+    while Station.objects.filter(name=station_name).exists():
+        suffix += 1
+        station_name = f"{base_name} #{suffix}"
+
+    station = Station.objects.create(
+        name=station_name,
+        ip_address=normalized,
+    )
+    return station
+
+
+def _expire_sibling_tokens(device: Device, claimed_token: DeviceProvisioningToken) -> None:
+    now_value = timezone.now()
+    pending_tokens = (
+        DeviceProvisioningToken.objects
+        .filter(device=device, used_at__isnull=True)
+        .exclude(pk=claimed_token.pk)
+    )
+    for token_obj in pending_tokens:
+        metadata = token_obj.metadata or {}
+        metadata.update(
+            {
+                "auto_expired": True,
+                "auto_expired_at": now_value.isoformat(),
+            }
+        )
+        if not token_obj.expires_at or token_obj.expires_at > now_value:
+            token_obj.expires_at = now_value
+        token_obj.metadata = metadata
+        token_obj.save(update_fields=["expires_at", "metadata"])
 
 
 @allow_cors
@@ -533,32 +609,87 @@ def device_claim_view(request):
         )
 
     device = candidate.device
+
+    ingest_url = None
+    response_payload: Dict[str, Any] = {}
+
+    if device.device_type == "gas_monitor":
+        try:
+            gas_monitor = device.gas_monitor
+        except GasMonitorDevice.DoesNotExist:
+            return cors_json_response(
+                request,
+                {"message": "Associated gas monitor record not found."},
+                status=400,
+            )
+        ingest_path = reverse(
+            "gas_monitor:telemetry_ingest",
+            args=[gas_monitor.pk],
+        )
+        ingest_url = request.build_absolute_uri(ingest_path)
+        response_payload["gas_monitor_id"] = gas_monitor.pk
+    elif device.device_type == "andon":
+        station = None
+
+        station_hint = payload.get("station_id") or payload.get("andon_station_id")
+        if station_hint:
+            try:
+                station = Station.objects.filter(id=int(station_hint)).first()
+            except (TypeError, ValueError):  # pragma: no cover - defensive parse
+                station = None
+
+        if not station:
+            token_metadata = candidate.metadata if isinstance(candidate.metadata, dict) else {}
+            station = _ensure_station_for_device(device, token_metadata)
+
+        if not station:
+            return cors_json_response(
+                request,
+                {"message": "Associated Andon station not found."},
+                status=400,
+            )
+
+        ingest_path = reverse("andon:telemetry_ingest", args=[station.pk])
+        ingest_url = request.build_absolute_uri(ingest_path)
+        response_payload["andon_station_id"] = station.pk
+
+    if ingest_url is None:
+        ingest_path = reverse("api:device-data-ingest")
+        ingest_url = request.build_absolute_uri(ingest_path)
+
     api_key = device.issue_api_secret()
     encryption_key_b64 = device.get_or_create_encryption_key()
     device.last_updated = timezone.now()
     device.save(update_fields=["last_updated"])
 
-    candidate.update_metadata(
-        claimed_from_ip=request.META.get("REMOTE_ADDR"),
-        claimed_at=timezone.now().isoformat(),
-        device_metadata=payload.get("device_metadata"),
-    )
+    metadata_kwargs = {
+        "claimed_from_ip": request.META.get("REMOTE_ADDR"),
+        "claimed_at": timezone.now().isoformat(),
+        "device_metadata": payload.get("device_metadata"),
+    }
+    if device.device_type == "andon" and response_payload.get("andon_station_id"):
+        metadata_kwargs["andon_station_id"] = response_payload["andon_station_id"]
+        metadata_kwargs["andon_station_name"] = station.name if 'station' in locals() else None
+        metadata_kwargs["andon_station_ip"] = station.ip_address if 'station' in locals() else None
+
+    candidate.update_metadata(**metadata_kwargs)
     candidate.mark_used()
 
-    ingest_path = reverse("api:device-data-ingest")
-    ingest_url = request.build_absolute_uri(ingest_path)
+    _expire_sibling_tokens(device, candidate)
 
-    response_payload = {
-        "device_id": device.id,
-        "api_key": api_key,
-        "encryption_key_b64": encryption_key_b64,
-        "ingest_url": ingest_url,
-        "token_expires_at": (
-            timezone.localtime(candidate.expires_at).isoformat()
-            if candidate.expires_at
-            else None
-        ),
-    }
+    response_payload.update(
+        {
+            "device_id": device.id,
+            "api_key": api_key,
+            "encryption_key_b64": encryption_key_b64,
+            "token_expires_at": (
+                timezone.localtime(candidate.expires_at).isoformat()
+                if candidate.expires_at
+                else None
+            ),
+            "ingest_url": ingest_url,
+        }
+    )
     return cors_json_response(request, response_payload, status=201)
 
 

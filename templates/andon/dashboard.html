@@ -1,180 +1,419 @@
 {% extends "base.html" %}
 {% block title %}Andon Dashboard{% endblock %}
 
-{% block content %}
+{% block extra_css %}
 <style>
-  .card-station{background:#f0f8ff}
-  .tile-plan{background:#2c3e50;color:#fff}
-  .tile-actual{background:#478778;color:#fff}
-  .tile-downtime{background:#f39c12;color:#fff}
-  .tile-fault{background:#9b59b6;color:#fff}
-  .tile-resolved{background:#1abc9c;color:#fff}
-  .tile h6{font-weight:700;margin:0;opacity:.95}
-  .tile .value{font-weight:800;font-size:2.25rem;line-height:1.1}
-  @media (min-width:1600px){.tile .value{font-size:3rem}}
-  .header-brand img{height:72px}
-  @media (min-width:1400px){.header-brand img{height:96px}}
-  .station-header{background:#2c3e50;color:#fff}
-  .station-header h4{margin:0;font-weight:700}
-  .slide-btn{background:#3498db;color:#fff;border:none;font-weight:700}
-</style>
+  .andon-dashboard {
+    background: linear-gradient(135deg, #1c2535 0%, #0f172a 100%);
+    color: #f4f7fb;
+    border-radius: 20px;
+    padding: 28px 32px;
+    box-shadow: 0 18px 40px rgba(13, 30, 60, 0.45);
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+  .andon-dashboard .dashboard-top {
+    background: #fefefe;
+    color: #14213d;
+    border-radius: 16px;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 24px;
+    box-shadow: inset 0 -2px 0 rgba(17, 24, 39, 0.08);
+  }
+  .dashboard-top .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .dashboard-top .header-brand img {
+    height: 72px;
+    object-fit: contain;
+  }
+  .dashboard-title {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .dashboard-clock {
+    text-align: right;
+  }
+  .dashboard-clock-date {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: #334155;
+  }
+  .dashboard-clock-time {
+    font-weight: 700;
+    font-size: 1.65rem;
+    color: #111827;
+  }
 
-<!-- Header with logos + clock -->
-<div class="card border-0 shadow-sm mb-3">
-  <div class="card-body d-flex align-items-center justify-content-between">
-    <div class="header-brand d-flex align-items-center gap-3">
+  .station-banner {
+    background: linear-gradient(135deg, rgba(16, 24, 40, 0.85) 0%, rgba(30, 43, 68, 0.95) 100%);
+    border-radius: 16px;
+    padding: 18px 24px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .station-banner .nav-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.12);
+    color: #f8fafc;
+    font-size: 1.4rem;
+    font-weight: 700;
+    transition: background 0.2s ease;
+  }
+  .station-banner .nav-btn:hover,
+  .station-banner .nav-btn:focus {
+    background: rgba(255, 255, 255, 0.25);
+    outline: none;
+  }
+  .station-details {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .station-name-block {
+    text-align: center;
+    flex: 1;
+  }
+  .station-name {
+    font-size: 2.6rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+  }
+  .station-updated {
+    margin-top: 4px;
+    font-size: 0.95rem;
+    opacity: 0.75;
+  }
+  .station-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .shift-chip {
+    background: rgba(56, 189, 248, 0.18);
+    border: 1px solid rgba(56, 189, 248, 0.45);
+    color: #bae6fd;
+    border-radius: 999px;
+    padding: 9px 18px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .station-meta .config-btn {
+    background: rgba(148, 163, 184, 0.15);
+    color: #e2e8f0;
+    border: none;
+    border-radius: 50%;
+    width: 46px;
+    height: 46px;
+    font-size: 1.2rem;
+    display: grid;
+    place-items: center;
+    transition: background 0.2s ease;
+  }
+  .station-meta .config-btn:hover,
+  .station-meta .config-btn:focus {
+    background: rgba(148, 163, 184, 0.32);
+    outline: none;
+  }
+
+  .tiles-grid {
+    display: grid;
+    gap: 22px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .tile {
+    border-radius: 20px;
+    padding: 26px 18px;
+    text-align: center;
+    box-shadow: inset 0 -4px 0 rgba(255, 255, 255, 0.18), 0 10px 30px rgba(15, 23, 42, 0.35);
+  }
+  .tile-label {
+    font-size: 1.2rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+  }
+  .tile-value {
+    font-size: 3rem;
+    font-weight: 800;
+    line-height: 1.05;
+  }
+  .tile-plan { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #eff6ff; }
+  .tile-actual { background: linear-gradient(135deg, #0f766e, #14b8a6); color: #ecfdf5; }
+  .tile-downtime { background: linear-gradient(135deg, #f97316, #fb923c); color: #fff7ed; }
+  .tile-fault { background: linear-gradient(135deg, #6d28d9, #a855f7); color: #f5f3ff; }
+  .tile-resolved { background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #e0f2fe; }
+
+  .status-bar {
+    margin-top: 28px;
+    border-radius: 16px;
+    padding: 20px 18px;
+    font-size: 1.7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    letter-spacing: 0.05em;
+  }
+  .status-running {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #f0fdf4;
+  }
+  .status-stopped {
+    background: linear-gradient(135deg, #dc2626, #f97316);
+    color: #fff7ed;
+  }
+  .status-bar .status-icon {
+    font-size: 2rem;
+  }
+
+  @media (max-width: 992px) {
+    .andon-dashboard {
+      padding: 22px 20px;
+    }
+    .station-banner {
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .station-details {
+      flex-direction: column;
+      gap: 12px;
+    }
+    .station-name {
+      font-size: 2rem;
+    }
+    .dashboard-top {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 18px;
+    }
+    .dashboard-top .header-brand {
+      flex-wrap: wrap;
+    }
+    .dashboard-clock {
+      text-align: left;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="andon-dashboard">
+  <div class="dashboard-top">
+    <div class="header-brand">
       <img src="{{ left_logo_url }}" alt="Left Logo">
       <img src="{{ right_logo_url }}" alt="Right Logo">
     </div>
-    <h2 class="mb-0 text-primary fw-bold">Andon Dashboard</h2>
-    <div class="text-end">
-      <div id="nowDate" class="fs-5 text-muted"></div>
-      <div id="nowTime" class="fs-3 fw-bold"></div>
-    </div>
-  </div>
-</div>
-
-<!-- Station card with ◀ ▶ -->
-<div id="andon-root" class="card card-station border-0 shadow-sm">
-  <div class="card-header station-header">
-    <div class="d-flex align-items-center justify-content-between">
-      <button class="btn slide-btn" id="prevBtn" aria-label="Previous">◀</button>
-      <div class="text-center flex-grow-1">
-        <h4 class="mb-1" id="stName">—</h4>
-        <div class="small"><span class="opacity-75">Updated </span><span id="stUpdated">—</span></div>
-      </div>
-      <button class="btn slide-btn" id="nextBtn" aria-label="Next">▶</button>
+    <div class="dashboard-title">Andon Dashboard</div>
+    <div class="dashboard-clock">
+      <div class="dashboard-clock-date" id="nowDate">—</div>
+      <div class="dashboard-clock-time" id="nowTime">—</div>
     </div>
   </div>
 
-  <div class="card-body">
-    <div class="row g-3 mb-3">
-      <div class="col-12 col-lg-4">
-        <div class="tile tile-plan rounded p-3 h-100 text-center">
-          <h6>Plan Count</h6>
-          <div class="value" id="valPlan">0</div>
-        </div>
+  <div class="station-banner" id="andon-root">
+    <button class="nav-btn" id="prevBtn" aria-label="Previous station">◀</button>
+    <div class="station-details">
+      <div class="station-name-block">
+        <div class="station-name" id="stName">—</div>
+        <div class="station-updated">Last update: <span id="stUpdated">—</span></div>
       </div>
-      <div class="col-12 col-lg-4">
-        <div class="tile tile-actual rounded p-3 h-100 text-center">
-          <h6>Actual Count</h6>
-          <div class="value" id="valActual">0</div>
-        </div>
-      </div>
-      <div class="col-12 col-lg-4">
-        <div class="tile tile-downtime rounded p-3 h-100 text-center">
-          <h6>Total Downtime</h6>
-          <div class="value" id="valDowntime">0 mins</div>
-        </div>
+      <div class="station-meta">
+        <div class="shift-chip">Shift: <span id="shiftLabel">{{ current_shift_label|default:"—" }}</span></div>
+        <button class="config-btn" id="seeConfigBtn" aria-label="Station details">⚙</button>
       </div>
     </div>
+    <button class="nav-btn" id="nextBtn" aria-label="Next station">▶</button>
+  </div>
 
-    <div class="row g-3">
-      <div class="col-12 col-lg-6">
-        <div class="tile tile-fault rounded p-3 h-100 text-center">
-          <h6>Fault Time</h6>
-          <div class="value" id="valFault">—</div>
-        </div>
-      </div>
-      <div class="col-12 col-lg-6">
-        <div class="tile tile-resolved rounded p-3 h-100 text-center">
-          <h6>Resolved Time</h6>
-          <div class="value" id="valResolved">—</div>
-        </div>
-      </div>
+  <div class="tiles-grid">
+    <div class="tile tile-plan">
+      <div class="tile-label">Plan Count</div>
+      <div class="tile-value" id="valPlan">0</div>
     </div>
+    <div class="tile tile-actual">
+      <div class="tile-label">Actual Count</div>
+      <div class="tile-value" id="valActual">0</div>
+    </div>
+    <div class="tile tile-downtime">
+      <div class="tile-label">Total Downtime</div>
+      <div class="tile-value" id="valDowntime">0 mins</div>
+    </div>
+    <div class="tile tile-fault">
+      <div class="tile-label">Fault Time</div>
+      <div class="tile-value" id="valFault">—</div>
+    </div>
+    <div class="tile tile-resolved">
+      <div class="tile-label">Resolved Time</div>
+      <div class="tile-value" id="valResolved">—</div>
+    </div>
+  </div>
 
-    <div class="mt-3 d-flex justify-content-end">
-      <button class="btn btn-outline-primary" id="seeConfigBtn">See device config</button>
-    </div>
+  <div class="status-bar status-running" id="statusBar">
+    <span class="status-icon" id="statusIcon">✔</span>
+    <span id="statusText">Running</span>
   </div>
 </div>
 
 <!-- Config modal -->
 <div class="modal fade" id="cfgModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog"><div class="modal-content">
-    <div class="modal-header">
-      <h5 class="modal-title">Station Details</h5>
-      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Station Details</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Station</dt>
+          <dd class="col-sm-8" id="cfgName">-</dd>
+          <dt class="col-sm-4">IP Address</dt>
+          <dd class="col-sm-8" id="cfgIp">-</dd>
+          <dt class="col-sm-4">Added On</dt>
+          <dd class="col-sm-8" id="cfgCreated">-</dd>
+          <dt class="col-sm-4">Last Updated</dt>
+          <dd class="col-sm-8" id="cfgUpdated">-</dd>
+        </dl>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button class="btn btn-outline-secondary" id="cfgDownload">Download</button>
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
     </div>
-    <div class="modal-body">
-      <dl class="row mb-0">
-        <dt class="col-sm-4">Station</dt><dd class="col-sm-8" id="cfgName">-</dd>
-        <dt class="col-sm-4">IP Address</dt><dd class="col-sm-8" id="cfgIp">-</dd>
-        <dt class="col-sm-4">Added On</dt><dd class="col-sm-8" id="cfgCreated">-</dd>
-        <dt class="col-sm-4">Last Updated</dt><dd class="col-sm-8" id="cfgUpdated">-</dd>
-      </dl>
-    </div>
-    <div class="modal-footer justify-content-between">
-      <button class="btn btn-outline-secondary" id="cfgDownload">Download</button>
-      <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-    </div>
-  </div></div>
+  </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
-
 {{ stations_json|json_script:"stations-data" }}
 <script>
 (function(){
-  // live clock
-  function tick(){
-    const now = new Date();
-    document.getElementById('nowDate').textContent = now.toLocaleDateString();
-    document.getElementById('nowTime').textContent = now.toLocaleTimeString();
-  }
-  tick(); setInterval(tick, 1000);
-
-  // stations is passed from the view; ensure it's JSON-safe there if needed
-  
   const stations = JSON.parse(document.getElementById('stations-data').textContent);
   let idx = 0;
 
-  const el = (id)=>document.getElementById(id);
+  const el = (id) => document.getElementById(id);
   const modalEl = document.getElementById('cfgModal');
   const cfgModal = (window.bootstrap && modalEl) ? new bootstrap.Modal(modalEl) : null;
 
+  const shiftLabel = el('shiftLabel');
+  if (shiftLabel && !shiftLabel.textContent.trim()) {
+    shiftLabel.textContent = '—';
+  }
+
+  function tick(){
+    const now = new Date();
+    el('nowDate').textContent = now.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+    el('nowTime').textContent = now.toLocaleTimeString(undefined, { hour12: false });
+  }
+  tick();
+  setInterval(tick, 1000);
+
   function fmtDate(s){
     if(!s) return '—';
-    try { return new Date(s).toLocaleString(); } catch(e){ return s; }
+    try {
+      return new Date(s).toLocaleString(undefined, { hour12: false });
+    } catch(e){
+      return s;
+    }
   }
+
+  function fmtTime(label, timestamp){
+    if(!timestamp) return '—';
+    try {
+      const parsed = new Date(timestamp);
+      const time = parsed.toLocaleTimeString(undefined, { hour12: false });
+      return label ? `${label.toUpperCase()}: ${time}` : time;
+    } catch (e) {
+      return label ? `${label.toUpperCase()}: ${timestamp}` : timestamp;
+    }
+  }
+
   function fill(){
-    if(!stations.length) return;
+    if(!stations.length) {
+      el('stName').textContent = 'No stations configured';
+      el('andon-root')?.classList.add('opacity-50');
+      return;
+    }
     const st = stations[idx];
     el('stName').textContent = st.name;
     el('stUpdated').textContent = fmtDate(st.last_updated);
-    el('valPlan').textContent = st.plan ?? 0;
-    el('valActual').textContent = st.actual ?? 0;
-    el('valDowntime').textContent = (st.downtime_min ?? 0).toFixed(1) + ' mins';
-    el('valFault').textContent = st.fault_time || '—';
-    el('valResolved').textContent = st.resolved_time || '—';
+    el('valPlan').textContent = Math.round(st.plan ?? 0);
+    el('valActual').textContent = Math.round(st.actual ?? 0);
+    const downtime = Number.parseFloat(st.downtime_min ?? 0);
+    el('valDowntime').textContent = `${isNaN(downtime) ? 0 : downtime.toFixed(1)} mins`;
+    el('valFault').textContent = fmtTime(st.calltype, st.fault_time);
+    el('valResolved').textContent = fmtTime(st.calltype, st.resolved_time);
     el('cfgName').textContent = st.name;
     el('cfgIp').textContent = st.ip || '—';
     el('cfgCreated').textContent = fmtDate(st.created_at);
     el('cfgUpdated').textContent = fmtDate(st.last_updated);
+
+    const statusBar = el('statusBar');
+    const statusIcon = el('statusIcon');
+    const statusText = el('statusText');
+    const isRunning = Boolean(st.is_active);
+    statusBar.classList.toggle('status-running', isRunning);
+    statusBar.classList.toggle('status-stopped', !isRunning);
+    statusIcon.textContent = isRunning ? '✔' : '⚠';
+    statusText.textContent = isRunning ? 'Running' : 'Stopped';
   }
 
-  document.getElementById('prevBtn').addEventListener('click', ()=>{ if(!stations.length) return; idx=(idx-1+stations.length)%stations.length; fill(); });
-  document.getElementById('nextBtn').addEventListener('click', ()=>{ if(!stations.length) return; idx=(idx+1)%stations.length; fill(); });
-  document.getElementById('seeConfigBtn').addEventListener('click', ()=>{ if(cfgModal) cfgModal.show(); });
+  el('prevBtn').addEventListener('click', () => {
+    if(!stations.length) return;
+    idx = (idx - 1 + stations.length) % stations.length;
+    fill();
+  });
+  el('nextBtn').addEventListener('click', () => {
+    if(!stations.length) return;
+    idx = (idx + 1) % stations.length;
+    fill();
+  });
+  el('seeConfigBtn').addEventListener('click', () => {
+    if(cfgModal) cfgModal.show();
+  });
 
-  document.getElementById('cfgDownload').addEventListener('click', ()=>{
+  el('cfgDownload').addEventListener('click', () => {
     if(!stations.length) return;
     const st = stations[idx];
     const rows = [
-      ['Field','Value'],
+      ['Field', 'Value'],
       ['Station', st.name || ''],
       ['IP', st.ip || ''],
       ['Added On', fmtDate(st.created_at)],
       ['Last Updated', fmtDate(st.last_updated)],
     ];
-    const csv = [rows.map(r=>r.map(v=>String(v??'').replace(/"/g,'""'))
-                      .map(c=>/[,\n]/.test(c)?`"${c}"`:c).join(',')).join('\n')];
-    const blob = new Blob(csv, {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob); const a=document.createElement('a');
-    a.href = url; a.download = `station-${st.id}.csv`; document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+    const csvBody = rows.map(row => row
+      .map(value => String(value ?? '').replace(/"/g, '""'))
+      .map(value => /[,\n]/.test(value) ? `"${value}"` : value)
+      .join(',')
+    ).join('\n');
+    const blob = new Blob([csvBody], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `station-${st.id}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   });
 
   fill();

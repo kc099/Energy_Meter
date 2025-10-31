@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Gas Monitor Devices | Edgesync{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+    <div>
+        <h1 class="h4 text-primary mb-1">Gas monitor devices</h1>
+        <p class="text-muted mb-0">Overview of all gas monitoring sensors and their maintenance status.</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'gas_monitor:device_create' %}">Add gas monitor</a>
+</div>
+{% if devices %}
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">Monitor</th>
+                        <th scope="col">Location</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Installed</th>
+                        <th scope="col">Last Maintenance</th>
+                        <th scope="col">Updated</th>
+                        <th scope="col" class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for device in devices %}
+                        <tr>
+                            <td>
+                                <a href="{% url 'gas_monitor:device_detail' device.pk %}" class="fw-medium text-decoration-none">
+                                    {{ device.device.located_at|default:"—" }}
+                                </a>
+                                <div class="text-muted small">{{ device.device.device_address|default:"No address" }}</div>
+                            </td>
+                            <td>{{ device.location|default:"—" }}</td>
+                            <td>
+                                {% if device.status == 'active' %}
+                                    <span class="badge bg-success">Active</span>
+                                {% elif device.status == 'maintenance' %}
+                                    <span class="badge bg-warning text-dark">Maintenance</span>
+                                {% elif device.status == 'fault' %}
+                                    <span class="badge bg-danger">Fault</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.installation_date %}
+                                    {{ device.installation_date|date:"M j, Y" }}
+                                {% else %}
+                                    <span class="text-muted">Not set</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.last_maintenance_date %}
+                                    {{ device.last_maintenance_date|date:"M j, Y" }}
+                                {% else %}
+                                    <span class="text-muted">Not recorded</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.device.last_updated %}
+                                    <span class="text-muted">{{ device.device.last_updated|timesince }} ago</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <a class="btn btn-outline-secondary btn-sm" href="{% url 'gas_monitor:device_detail' device.pk %}">View</a>
+                                <a class="btn btn-outline-primary btn-sm" href="{% url 'gas_monitor:device_update' device.pk %}">Edit</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% else %}
+    <div class="card shadow-sm">
+        <div class="card-body text-center py-5">
+            <h2 class="h5 text-muted mb-3">No gas monitors yet</h2>
+            <p class="text-muted mb-4">Register your first gas monitor to start tracking gas levels and maintenance schedules.</p>
+            <a class="btn btn-primary" href="{% url 'gas_monitor:device_create' %}">Add a gas monitor</a>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}

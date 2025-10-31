@@ -1,0 +1,45 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# VCS
+.git
+.gitignore
+
+# Local env
+.env
+*.env
+
+# Logs & runtime
+*.log
+celerybeat-schedule.*
+device_client_state.json
+*__pycache__*
+
+# IDE/editor
+*.code-workspace
+.vscode/
+.idea/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Node / frontend builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Static collections
+staticfiles/
+media/
+
+# Database dumps
+*.sqlite3
+
+# Docker
+Dockerfile*
+.dockerignore

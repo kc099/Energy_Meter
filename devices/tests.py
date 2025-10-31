@@ -1,11 +1,13 @@
 from datetime import timedelta
+import re
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core import mail
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Device, DeviceProvisioningToken
+from .models import Device, DeviceProvisioningToken, DeviceTokenAccessOTP
 
 
 class DeviceProvisioningTests(TestCase):
@@ -81,3 +83,74 @@ class DeviceProvisioningTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('device_address', form.errors)
         self.assertIn('already pending verification', form.errors['device_address'][0])
+
+
+@override_settings(
+    EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+    DEFAULT_FROM_EMAIL='no-reply@example.com',
+)
+class DeviceTokenOTPTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            email='owner@example.com',
+            username='owner',
+            password='pass1234',
+        )
+        self.user.shift_manager_email = 'reports@example.com'
+        self.user.save(update_fields=['shift_manager_email'])
+        self.device = Device.objects.create(
+            device_type='meter',
+            device_owner=self.user,
+            located_at='Test Bench',
+            device_address='10.0.0.5',
+            address_type='ip',
+            provisioning_state=Device.ProvisioningState.ACTIVE,
+            is_active=True,
+        )
+        self.current_token = self.device.issue_api_secret()
+        mail.outbox.clear()
+
+    def _request_otp(self):
+        self.client.force_login(self.user)
+        url = reverse('devices:device_token_request_otp', args=[self.device.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn('otp_id', payload)
+        self.assertIn('expires_at', payload)
+        self.assertTrue(mail.outbox)
+        body = mail.outbox[-1].body
+        self.assertEqual(mail.outbox[-1].to, ['reports@example.com'])
+        match = re.search(r'\b\d{6}\b', body)
+        self.assertIsNotNone(match, body)
+        return payload['otp_id'], match.group(0)
+
+    def test_reveal_token_with_valid_otp(self):
+        otp_id, otp_code = self._request_otp()
+        reveal_url = reverse('devices:device_token_detail', args=[self.device.id])
+        response = self.client.post(reveal_url, {'otp_id': otp_id, 'otp': otp_code})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['token'], self.current_token)
+
+        otp_entry = DeviceTokenAccessOTP.objects.get(id=otp_id)
+        self.assertIsNotNone(otp_entry.verified_at)
+
+    def test_reveal_token_with_wrong_otp_increments_attempts(self):
+        otp_id, otp_code = self._request_otp()
+        wrong_code = '000000'
+        if wrong_code == otp_code:
+            wrong_code = '111111'
+
+        reveal_url = reverse('devices:device_token_detail', args=[self.device.id])
+        response = self.client.post(reveal_url, {'otp_id': otp_id, 'otp': wrong_code})
+
+        self.assertEqual(response.status_code, 403)
+        data = response.json()
+        self.assertIn('error', data)
+
+        otp_entry = DeviceTokenAccessOTP.objects.get(id=otp_id)
+        self.assertEqual(otp_entry.attempt_count, 1)
+        self.assertIsNone(otp_entry.verified_at)

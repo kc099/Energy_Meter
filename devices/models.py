@@ -4,6 +4,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.core.exceptions import ValidationError
+from django.contrib.auth.hashers import make_password, check_password
 from datetime import timedelta
 import base64
 import logging
@@ -12,11 +13,14 @@ import json
 import secrets
 import hashlib
 import uuid
+import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .fields import EncryptedJSONField, EncryptedCharField
 
 
 logger = logging.getLogger(__name__)
+
+IPV4_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 class Shift(models.Model):
     name = models.CharField(max_length=50)  # e.g., "Morning Shift", "Night Shift"
@@ -272,19 +276,17 @@ class Device(models.Model):
         """
         Poll the device for new data
         """
-        logger.warning(
-            "Starting to poll device uid=%s url=%s", self.id, self.device_address
-        )
+        logger.warning("Starting to poll device device_id=%s", self.id)
         try:
             # Prepare URL
             url = self.device_address
             if not url.startswith(('http://', 'https://')):
                 url = f"http://{url}"
-            logger.warning("Requesting device data uid=%s url=%s", self.id, url)
+            logger.warning("Requesting device data device_id=%s", self.id)
 
             # Make request with longer timeout
             response = requests.get(url, timeout=10)
-            logger.warning("Device response status uid=%s status=%s", self.id, response.status_code)
+            logger.warning("Device response status device_id=%s status=%s", self.id, response.status_code)
             logger.warning("Device response bundle=%s", self._log_bundle_for_log(response.text))
             response.raise_for_status()
             
@@ -292,8 +294,8 @@ class Device(models.Model):
             try:
                 data = response.json()
                 logger.warning("Parsed JSON bundle=%s", self._log_bundle_for_log(data))
-            except json.JSONDecodeError as e:
-                logger.warning("Response not JSON uid=%s", self.id)
+            except json.JSONDecodeError:
+                logger.warning("Response not JSON device_id=%s", self.id)
                 data = response.text.strip()
             
             # Handle different response formats
@@ -317,21 +319,24 @@ class Device(models.Model):
             # Store in historical data
             DeviceData.objects.create(device=self, value=formatted_data)
             
-            logger.warning("Successfully stored device data uid=%s", self.id)
+            logger.warning("Successfully stored device data device_id=%s", self.id)
             return True, formatted_data
             
         except requests.exceptions.RequestException as e:
-            logger.warning("Request error uid=%s error=%s", self.id, e)
+            masked_error = self._redact_ip_addresses(str(e))
+            logger.warning("Request error device_id=%s error=%s", self.id, masked_error)
             self.is_active = False
             self.save()
             return False, f"Connection error: {str(e)}"
         except json.JSONDecodeError as e:
-            logger.warning("JSON parsing error uid=%s error=%s", self.id, e)
+            masked_error = self._redact_ip_addresses(str(e))
+            logger.warning("JSON parsing error device_id=%s error=%s", self.id, masked_error)
             self.is_active = False
             self.save()
             return False, f"Data format error: {str(e)}"
         except Exception as e:
-            logger.warning("Unexpected error uid=%s error=%s", self.id, e)
+            masked_error = self._redact_ip_addresses(str(e))
+            logger.warning("Unexpected error device_id=%s error=%s", self.id, masked_error)
             self.is_active = False
             self.save()
             return False, str(e)
@@ -345,6 +350,15 @@ class Device(models.Model):
         ciphertext = AESGCM(key_bytes).encrypt(nonce, serialized, None)
         return base64.b64encode(nonce + ciphertext).decode("ascii")
 
+    @staticmethod
+    def _redact_ip_addresses(value) -> str:
+        """Replace IPv4 addresses in the provided value with a redacted token."""
+
+        if value is None:
+            return ""
+        text = value if isinstance(value, str) else str(value)
+        return IPV4_PATTERN.sub("<redacted-ip>", text)
+
     def _log_bundle_for_log(self, payload) -> str:
         """Return logging structure with encrypted uid and payload."""
 
@@ -356,7 +370,8 @@ class Device(models.Model):
             }
             return json.dumps(bundle)
         except Exception as exc:  # pragma: no cover - logging safeguard
-            logger.warning("Failed to build log bundle uid=%s error=%s", self.id, exc)
+            masked_error = self._redact_ip_addresses(str(exc))
+            logger.warning("Failed to build log bundle device_id=%s error=%s", self.id, masked_error)
             return json.dumps({"uid": "<unable>", "payload": "<unable>"})
 
     def has_active_provisioning_window(self) -> bool:
@@ -493,6 +508,83 @@ class DeviceProvisioningToken(models.Model):
         if self.expires_at is None:
             return True
         return timezone.now() < self.expires_at
+
+
+class DeviceTokenAccessOTP(models.Model):
+    device = models.ForeignKey(
+        'Device',
+        on_delete=models.CASCADE,
+        related_name='token_access_otps',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='device_token_otps',
+    )
+    code_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    verified_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    MAX_ATTEMPTS = 5
+    DEFAULT_TTL = timedelta(minutes=2)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['device', 'user', 'expires_at']),
+        ]
+        ordering = ['-created_at']
+
+    @classmethod
+    def issue(
+        cls,
+        device,
+        user,
+        *,
+        ttl: timedelta | None = None,
+    ) -> tuple[str, 'DeviceTokenAccessOTP']:
+        now = timezone.now()
+        cls.objects.filter(
+            device=device,
+            user=user,
+            verified_at__isnull=True,
+            expires_at__lte=now,
+        ).delete()
+        cls.objects.filter(
+            device=device,
+            user=user,
+            verified_at__isnull=True,
+            expires_at__gt=now,
+        ).update(expires_at=now)
+        ttl = ttl or cls.DEFAULT_TTL
+        raw_code = f"{secrets.randbelow(1_000_000):06d}"
+        otp = cls.objects.create(
+            device=device,
+            user=user,
+            code_hash=make_password(raw_code),
+            expires_at=now + ttl,
+        )
+        return raw_code, otp
+
+    def is_expired(self) -> bool:
+        return timezone.now() > self.expires_at
+
+    def mark_verified(self) -> None:
+        if not self.verified_at:
+            self.verified_at = timezone.now()
+            self.save(update_fields=['verified_at', 'attempt_count'])
+
+    def register_failure(self) -> None:
+        self.attempt_count += 1
+        updates = ['attempt_count']
+        if self.attempt_count >= self.MAX_ATTEMPTS:
+            self.expires_at = timezone.now()
+            updates.append('expires_at')
+        self.save(update_fields=updates)
+
+    def validate_code(self, raw_code: str) -> bool:
+        return check_password(raw_code, self.code_hash)
 
 
 class DeviceShare(models.Model):

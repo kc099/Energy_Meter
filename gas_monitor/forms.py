@@ -1,51 +1,74 @@
 from django import forms
+from django.db.models import Q
+
+from devices.models import Device
+
 from .models import GasMonitorDevice
 
-class GasMonitorDeviceForm(forms.ModelForm):
-    device_name = forms.CharField(
-        max_length=100,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'id': 'device_name'
-        })
-    )
-    gas_type = forms.ChoiceField(
-        choices=GasMonitorDevice.GAS_TYPE_CHOICES,
-        widget=forms.Select(attrs={
-            'class': 'form-control',
-            'id': 'gas_type'
-        })
-    )
-    threshold_value = forms.FloatField(
-        widget=forms.NumberInput(attrs={
-            'class': 'form-control',
-            'id': 'threshold_value'
-        })
-    )
 
+class GasMonitorDeviceForm(forms.ModelForm):
     class Meta:
         model = GasMonitorDevice
-        fields = ['device_name', 'location', 'gas_type', 'threshold_value']
+        fields = [
+            "device",
+            "location",
+            "installation_date",
+            "last_maintenance_date",
+            "status",
+        ]
+        widgets = {
+            "device": forms.Select(attrs={"class": "form-select"}),
+            "location": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "e.g. Boiler Room"}
+            ),
+            "installation_date": forms.DateInput(
+                attrs={"class": "form-control", "type": "date"}
+            ),
+            "last_maintenance_date": forms.DateInput(
+                attrs={"class": "form-control", "type": "date"}
+            ),
+            "status": forms.Select(attrs={"class": "form-select"}),
+        }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-    def clean_threshold_value(self):
-        value = self.cleaned_data.get('threshold_value')
-        if value is not None and value < 0:
-            raise forms.ValidationError("Threshold value must be non-negative")
-        return value
-    def clean_device_name(self):
-        name = self.cleaned_data.get('device_name')
-        if GasMonitorDevice.objects.filter(name=name).exists():
-            raise forms.ValidationError("A device with this name already exists.")
-        return name
-    def clean_location(self):
-        location = self.cleaned_data.get('location')
-        if not location:
-            raise forms.ValidationError("Location cannot be empty.")
-        return location
-    def clean_gas_type(self):
-        gas_type = self.cleaned_data.get('gas_type')
-        if gas_type not in dict(GasMonitorDevice.GAS_TYPE_CHOICES).keys():
-            raise forms.ValidationError("Invalid gas type selected.")
-        return gas_type
+        qs = Device.objects.filter(device_type="gas_monitor").filter(
+            Q(gas_monitor__isnull=True) | Q(gas_monitor=self.instance)
+        )
+        self.fields["device"].queryset = qs.order_by("located_at")
+        self.fields["device"].help_text = "Choose the base device for this monitor."
+        self.fields["location"].widget.attrs.setdefault("autocomplete", "off")
 
+    def clean_device(self):
+        device = self.cleaned_data["device"]
+
+        if device.device_type != "gas_monitor":
+            raise forms.ValidationError("Select a device configured as a gas monitor.")
+
+        conflict_qs = GasMonitorDevice.objects.filter(device=device)
+        if self.instance.pk:
+            conflict_qs = conflict_qs.exclude(pk=self.instance.pk)
+        if conflict_qs.exists():
+            raise forms.ValidationError(
+                "This device already has gas monitor details registered."
+            )
+
+        return device
+
+    def clean(self):
+        cleaned_data = super().clean()
+        installation_date = cleaned_data.get("installation_date")
+        maintenance_date = cleaned_data.get("last_maintenance_date")
+
+        if (
+            installation_date
+            and maintenance_date
+            and maintenance_date < installation_date
+        ):
+            self.add_error(
+                "last_maintenance_date",
+                "Maintenance date cannot be earlier than installation date.",
+            )
+
+        return cleaned_data

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Edit Gas Monitor | Edgesync{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-7 col-xl-6">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h1 class="h5 text-primary mb-3">Update gas monitor</h1>
+                <p class="text-muted mb-4">Adjust installation or maintenance details for {{ device.device.located_at|default:"this monitor" }}.</p>
+                <form method="post" novalidate>
+                    {% include "gas_monitor/includes/_form_fields.html" with form=form %}
+                    <div class="d-flex justify-content-between">
+                        <a class="btn btn-outline-secondary" href="{% url 'gas_monitor:device_detail' device.pk %}">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Save changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

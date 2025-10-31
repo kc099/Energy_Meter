@@ -25,6 +25,27 @@ from devices.models import Device as PortalDevice
 logger = logging.getLogger(__name__)
 
 
+def _expire_sibling_tokens(device: Device, claimed_token: DeviceProvisioningToken) -> None:
+    now_value = timezone.now()
+    pending_tokens = (
+        DeviceProvisioningToken.objects
+        .filter(device=device, used_at__isnull=True)
+        .exclude(pk=claimed_token.pk)
+    )
+    for token_obj in pending_tokens:
+        metadata = token_obj.metadata or {}
+        metadata.update(
+            {
+                "auto_expired": True,
+                "auto_expired_at": now_value.isoformat(),
+            }
+        )
+        if not token_obj.expires_at or token_obj.expires_at > now_value:
+            token_obj.expires_at = now_value
+        token_obj.metadata = metadata
+        token_obj.save(update_fields=["expires_at", "metadata"])
+
+
 def _parse_json_body(request):
     try:
         return json.loads(request.body.decode("utf-8"))
@@ -149,6 +170,8 @@ def claim_device_view(request):
         device_metadata=payload.get("device_metadata"),
     )
     candidate.mark_used()
+
+    _expire_sibling_tokens(device, candidate)
 
     ingest_path = reverse("device-gateway:telemetry-ingest")
     ingest_url = request.build_absolute_uri(ingest_path)

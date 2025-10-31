@@ -1,6 +1,8 @@
 import csv
-from datetime import date, datetime
+import json
+from datetime import date, datetime, time
 from io import BytesIO
+from collections.abc import Mapping
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -111,6 +113,28 @@ def _stringify(value):
     if value is None:
         return ''
     return str(value)
+
+
+def _normalize_record_value(value):
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        if isinstance(parsed, Mapping):
+            return parsed
+    return {}
+
+
+def _date_bounds(start_date: date, end_date: date):
+    tz = timezone.get_current_timezone()
+    start_dt = datetime.combine(start_date, time.min)
+    end_dt = datetime.combine(end_date, time.max)
+    start_aware = timezone.make_aware(start_dt, tz)
+    end_aware = timezone.make_aware(end_dt, tz)
+    return start_aware, end_aware
 
 
 def _format_table_lines(headers, rows):
@@ -237,10 +261,11 @@ def _device_access_q(user):
 
 def _meter_reading_rows(user, start_date, end_date, limit=None, offset=0, sort_key=None):
     order_by_field = READINGS_ORDER_MAP.get(sort_key, READINGS_ORDER_MAP[READINGS_SORT_DEFAULT])
+    start_dt, end_dt = _date_bounds(start_date, end_date)
     queryset = (
         DeviceData.objects.filter(
             _device_access_q(user),
-            timestamp__date__range=(start_date, end_date),
+            timestamp__range=(start_dt, end_dt),
         )
         .select_related('device')
         .order_by(order_by_field)
@@ -257,7 +282,7 @@ def _meter_reading_rows(user, start_date, end_date, limit=None, offset=0, sort_k
 
     rows = []
     for record in queryset:
-        value = record.value or {}
+        value = _normalize_record_value(record.value)
         rows.append([
             _format_datetime(record.timestamp),
             record.device.located_at,

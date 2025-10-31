@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Gas Monitor Details | Edgesync{% endblock %}
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+    <div>
+        <h1 class="h4 text-primary mb-1">{{ device.device.located_at|default:"Gas monitor" }}</h1>
+        <div>
+            {% if device.status == 'active' %}
+                <span class="badge bg-success">Active</span>
+            {% elif device.status == 'maintenance' %}
+                <span class="badge bg-warning text-dark">Maintenance</span>
+            {% elif device.status == 'fault' %}
+                <span class="badge bg-danger">Fault</span>
+            {% else %}
+                <span class="badge bg-secondary">Inactive</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'gas_monitor:device_list' %}">Back to list</a>
+        <a class="btn btn-outline-primary" href="{% url 'gas_monitor:device_update' device.pk %}">Edit</a>
+        <a class="btn btn-outline-danger" href="{% url 'gas_monitor:device_delete' device.pk %}">Delete</a>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-light fw-semibold">Monitor details</div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-5 text-muted">Location</dt>
+                    <dd class="col-sm-7">{{ device.location|default:"—" }}</dd>
+
+                    <dt class="col-sm-5 text-muted">Installation date</dt>
+                    <dd class="col-sm-7">
+                        {% if device.installation_date %}
+                            {{ device.installation_date|date:"M j, Y" }}
+                        {% else %}
+                            <span class="text-muted">Not set</span>
+                        {% endif %}
+                    </dd>
+
+                    <dt class="col-sm-5 text-muted">Last maintenance</dt>
+                    <dd class="col-sm-7">
+                        {% if device.last_maintenance_date %}
+                            {{ device.last_maintenance_date|date:"M j, Y" }}
+                        {% else %}
+                            <span class="text-muted">Not recorded</span>
+                        {% endif %}
+                    </dd>
+
+                    <dt class="col-sm-5 text-muted">Created</dt>
+                    <dd class="col-sm-7">
+                        {% if device.created_at %}
+                            {{ device.created_at|date:"M j, Y" }}
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if latest_sample %}
+<div class="row g-4 mt-1">
+    <div class="col-lg-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-primary text-white fw-semibold">Latest reading</div>
+            <div class="card-body">
+                <h2 class="display-6">{{ latest_sample.gas_level|floatformat:2 }}
+                    <small class="text-muted">{{ latest_sample.unit }}</small>
+                </h2>
+                <p class="text-muted mb-0">Captured {{ latest_sample.timestamp|timesince }} ago</p>
+            </div>
+            {% if summary %}
+            <div class="card-footer bg-light">
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>24h avg</span>
+                    <span>{{ summary.avg|floatformat:2 }} {{ summary.unit }}</span>
+                </div>
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>High</span>
+                    <span>{{ summary.max|floatformat:2 }} {{ summary.unit }}</span>
+                </div>
+                <div class="d-flex justify-content-between text-muted small">
+                    <span>Low</span>
+                    <span>{{ summary.min|floatformat:2 }} {{ summary.unit }}</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-light fw-semibold">Gas level trend</div>
+            <div class="card-body">
+                <canvas id="gasMonitorChart" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+    <div class="card-header bg-light fw-semibold">Recent samples</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Recorded</th>
+                        <th scope="col" class="text-end">Gas level ({{ latest_sample.unit }})</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sample in recent_samples %}
+                    <tr>
+                        <td>{{ sample.timestamp|date:"M j, Y H:i:s" }}</td>
+                        <td class="text-end">{{ sample.gas_level|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" class="text-center text-muted py-4">No telemetry recorded yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info mt-4" role="alert">
+    No telemetry has been received for this gas monitor yet. Provision the device and run the client to begin streaming data.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+{% if latest_sample %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    (function() {
+        const labels = {{ chart_labels|safe }};
+        const values = {{ chart_values|safe }};
+        const ctx = document.getElementById('gasMonitorChart');
+
+        if (!ctx) {
+            return;
+        }
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Gas level',
+                    data: values,
+                    borderColor: '#0d6efd',
+                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                    fill: true,
+                    tension: 0.25,
+                    pointRadius: 2,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Time' },
+                        ticks: { maxRotation: 0 },
+                    },
+                    y: {
+                        title: { display: true, text: 'Level ({{ latest_sample.unit }})' },
+                        beginAtZero: false,
+                        ticks: {
+                            callback: (value) => `${value.toFixed ? value.toFixed(2) : value}`,
+                        },
+                    },
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false },
+                },
+                interaction: { mode: 'nearest', intersect: false },
+            },
+        });
+    })();
+</script>
+{% endif %}
+{% endblock %}

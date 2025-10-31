@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Remove Gas Monitor | Edgesync{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-xl-5">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h1 class="h5 text-danger mb-3">Remove gas monitor</h1>
+                <p class="text-muted">This will delete the gas monitor metadata for <strong>{{ device.device.located_at|default:"this monitor" }}</strong>. The base device record remains untouched.</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="d-flex justify-content-between">
+                        <a class="btn btn-outline-secondary" href="{% url 'gas_monitor:device_detail' device.pk %}">Cancel</a>
+                        <button type="submit" class="btn btn-danger">Delete monitor</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -25,7 +25,9 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("accounts.urls")),
     path("devices/", include("devices.urls")),
+    path("andon/", include("andon.urls", namespace="andon")),
     path("api/", include("api.urls")),
     path("gateway/", include("device_gateway.urls", namespace="device-gateway")),
+    path("gas_monitor/", include("gas_monitor.urls", namespace="gas_monitor")),
     path("api/v1/", include("api_frontend.urls"))
 ]

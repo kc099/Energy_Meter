@@ -1,68 +1,412 @@
 {% load static %}
-{% if andon_snapshot %}
-<div class="card shadow-sm mb-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <div>
-      <h5 class="mb-0">{{ andon_snapshot.name }}</h5>
-      <small class="text-muted">Last ping: {{ andon_snapshot.last_updated|date:"Y-m-d H:i"|default:"—" }}</small>
-    </div>
-    <span class="badge {% if andon_snapshot.is_active %}bg-success{% else %}bg-danger{% endif %}">
-      {% if andon_snapshot.is_active %}Active{% else %}Offline{% endif %}
-    </span>
-  </div>
+{% if andon_slides %}
+<div class="card shadow-sm mb-4 andon-device-card">
   <div class="card-body">
-    <div class="row g-3 mb-3">
-      <div class="col-12 col-sm-6 col-lg-3">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Plan</small>
-          <h4 class="mb-0 fw-bold">{{ andon_snapshot.plan|default:0 }}</h4>
+    <div class="andon-device-panel" id="andonDevicePanel" data-active-id="{{ active_andon_device_id }}">
+      <div class="andon-device-top">
+        <div class="andon-brand">
+          <img src="{% static 'images/RBA_logo.jpeg' %}" alt="Left logo">
+          <img src="{% static 'images/RBA_logo.jpeg' %}" alt="Right logo">
+        </div>
+        <div class="andon-panel-title">Andon Station Snapshot</div>
+        <div class="andon-clock">
+          <div id="adClockDate">—</div>
+          <div id="adClockTime">—</div>
         </div>
       </div>
-      <div class="col-12 col-sm-6 col-lg-3">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Actual</small>
-          <h4 class="mb-0 fw-bold">{{ andon_snapshot.actual|default:0 }}</h4>
+
+      <div class="andon-station-banner">
+        <button class="andon-nav-btn" id="adPrev" aria-label="Previous station">◀</button>
+        <div class="andon-banner-content">
+          <div class="andon-station-name" id="adStationName">—</div>
+          <div class="andon-station-meta">
+            <span class="andon-meta-chip">Shift: <span id="adShift">—</span></span>
+            <span class="andon-meta-chip">Location: <span id="adLocation">—</span></span>
+            <span class="andon-meta-text">Last update: <span id="adLastUpdated">—</span></span>
+          </div>
+        </div>
+        <button class="andon-nav-btn" id="adNext" aria-label="Next station">▶</button>
+      </div>
+
+      <div class="andon-tiles">
+        <div class="andon-tile andon-plan">
+          <div class="andon-tile-label">Plan Count</div>
+          <div class="andon-tile-value" id="adPlan">0</div>
+        </div>
+        <div class="andon-tile andon-actual">
+          <div class="andon-tile-label">Actual Count</div>
+          <div class="andon-tile-value" id="adActual">0</div>
+        </div>
+        <div class="andon-tile andon-downtime">
+          <div class="andon-tile-label">Total Downtime</div>
+          <div class="andon-tile-value" id="adDowntime">0 mins</div>
+        </div>
+        <div class="andon-tile andon-fault">
+          <div class="andon-tile-label">Fault Time</div>
+          <div class="andon-tile-value" id="adFault">—</div>
+        </div>
+        <div class="andon-tile andon-resolved">
+          <div class="andon-tile-label">Resolved Time</div>
+          <div class="andon-tile-value" id="adResolved">—</div>
         </div>
       </div>
-      <div class="col-12 col-sm-6 col-lg-3">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Downtime</small>
-          <h4 class="mb-0 fw-bold">{{ andon_snapshot.downtime_min|floatformat:1 }} mins</h4>
-        </div>
+
+      <div class="andon-status" id="adStatusBar">
+        <span class="andon-status-icon" id="adStatusIcon">✔</span>
+        <span id="adStatusText">Running</span>
       </div>
-      <div class="col-12 col-sm-6 col-lg-3">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Station IP</small>
-          <h4 class="mb-0 fw-bold">{{ andon_snapshot.ip|default:"—" }}</h4>
-        </div>
+
+      <div class="d-flex justify-content-end gap-2 flex-wrap mt-3">
+        {% if can_view_config %}
+        <button type="button" class="btn btn-outline-light device-config-trigger" data-config-url="{{ config_url }}">
+          <i class="fas fa-tools me-1"></i> See Device Config
+        </button>
+        {% endif %}
+        <a id="adDeviceLink" href="#" class="btn btn-outline-light">Open Device Page</a>
       </div>
     </div>
-    <div class="row g-3 mb-3">
-      <div class="col-12 col-lg-6">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Fault Time</small>
-          <h5 class="mb-0">{{ andon_snapshot.fault_time|date:"Y-m-d H:i"|default:"—" }}</h5>
-        </div>
-      </div>
-      <div class="col-12 col-lg-6">
-        <div class="p-3 rounded bg-light h-100">
-          <small class="text-muted d-block">Resolved Time</small>
-          <h5 class="mb-0">{{ andon_snapshot.resolved_time|date:"Y-m-d H:i"|default:"—" }}</h5>
-        </div>
-      </div>
-    </div>
-    {% if can_view_config %}
-    <div class="d-flex justify-content-end">
-      <button type="button" class="btn btn-outline-primary device-config-trigger" data-config-url="{{ config_url }}">
-        <i class="fas fa-tools me-1"></i> See Device Config
-      </button>
-    </div>
-    {% endif %}
   </div>
 </div>
+
+<style>
+  .andon-device-card {
+    border: none;
+  }
+  .andon-device-panel {
+    background: linear-gradient(135deg, #101828 0%, #1f2937 100%);
+    color: #f8fafc;
+    border-radius: 20px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .andon-device-panel::after {
+    content: "";
+    position: absolute;
+    inset: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    pointer-events: none;
+  }
+  .andon-device-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 20px;
+  }
+  .andon-brand {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+  .andon-brand img {
+    height: 60px;
+    object-fit: contain;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 6px 10px;
+  }
+  .andon-panel-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .andon-clock {
+    text-align: right;
+    font-weight: 600;
+  }
+  .andon-clock div:first-child {
+    font-size: 1rem;
+    color: #cbd5f5;
+  }
+  .andon-clock div:last-child {
+    font-size: 1.5rem;
+    color: #f8fafc;
+  }
+  .andon-station-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 16px;
+    padding: 18px 20px;
+    margin-bottom: 24px;
+  }
+  .andon-nav-btn {
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.14);
+    color: #f8fafc;
+    font-size: 1.4rem;
+    font-weight: 700;
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+  .andon-nav-btn:hover:not([disabled]),
+  .andon-nav-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.26);
+    transform: translateY(-2px);
+    outline: none;
+  }
+  .andon-nav-btn[disabled] {
+    opacity: 0.35;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .andon-banner-content {
+    flex: 1;
+    text-align: center;
+  }
+  .andon-station-name {
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+  }
+  .andon-station-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 8px;
+    font-size: 0.95rem;
+    color: rgba(226, 232, 240, 0.85);
+  }
+  .andon-meta-chip {
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-weight: 600;
+  }
+  .andon-meta-text {
+    font-weight: 500;
+    opacity: 0.8;
+  }
+  .andon-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .andon-tile {
+    border-radius: 18px;
+    padding: 18px;
+    text-align: center;
+    box-shadow: inset 0 -4px 0 rgba(255, 255, 255, 0.2), 0 12px 28px rgba(15, 23, 42, 0.45);
+  }
+  .andon-tile-label {
+    font-size: 1.05rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
+  .andon-tile-value {
+    font-size: 2.6rem;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+  .andon-plan { background: linear-gradient(135deg, #1e40af, #2563eb); color: #eff6ff; }
+  .andon-actual { background: linear-gradient(135deg, #0f766e, #14b8a6); color: #ecfdf5; }
+  .andon-downtime { background: linear-gradient(135deg, #f97316, #fb923c); color: #fff7ed; }
+  .andon-fault { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #f5f3ff; }
+  .andon-resolved { background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #e0f2fe; }
+
+  .andon-status {
+    margin-top: 26px;
+    border-radius: 16px;
+    padding: 18px;
+    font-size: 1.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    letter-spacing: 0.04em;
+    transition: background 0.3s ease;
+  }
+  .andon-status-icon {
+    font-size: 2rem;
+  }
+  .andon-status.running {
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    color: #f0fdf4;
+  }
+  .andon-status.stopped {
+    background: linear-gradient(135deg, #dc2626, #f97316);
+    color: #fff5f0;
+  }
+
+  #adDeviceLink {
+    font-weight: 600;
+    border-color: rgba(255, 255, 255, 0.45);
+    color: #f8fafc;
+  }
+  #adDeviceLink:hover {
+    border-color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.12);
+    color: #f8fafc;
+  }
+
+  @media (max-width: 992px) {
+    .andon-device-panel {
+      padding: 18px;
+    }
+    .andon-device-top {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .andon-clock {
+      text-align: left;
+    }
+    .andon-station-name {
+      font-size: 2rem;
+    }
+  }
+</style>
+
+{{ andon_slides|json_script:"andon-slides-data" }}
+<script>
+(function(){
+  const panel = document.getElementById('andonDevicePanel');
+  if (!panel) return;
+
+  const slidesData = JSON.parse(document.getElementById('andon-slides-data').textContent);
+  if (!Array.isArray(slidesData) || !slidesData.length) {
+    return;
+  }
+
+  const activeIdAttr = panel.dataset.activeId;
+  const activeId = Number.parseInt(activeIdAttr, 10);
+  let idx = slidesData.findIndex(slide => slide.device_id === activeId);
+  if (idx === -1) {
+    idx = 0;
+  }
+
+  const el = (id) => document.getElementById(id);
+  const prevBtn = el('adPrev');
+  const nextBtn = el('adNext');
+  const statusBar = el('adStatusBar');
+  const statusIcon = el('adStatusIcon');
+  const statusText = el('adStatusText');
+  const deviceLink = el('adDeviceLink');
+
+  function tickClock(){
+    const now = new Date();
+    el('adClockDate').textContent = now.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' });
+    el('adClockTime').textContent = now.toLocaleTimeString(undefined, { hour12: false });
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  function fmtDateTime(value){
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString(undefined, { hour12: false });
+    } catch (err) {
+      return value;
+    }
+  }
+
+  function fmtEvent(calltype, timestamp){
+    if (!timestamp) return '—';
+    try {
+      const timeStr = new Date(timestamp).toLocaleTimeString(undefined, { hour12: false });
+      return calltype ? `${calltype.toUpperCase()}: ${timeStr}` : timeStr;
+    } catch (err) {
+      return calltype ? `${calltype.toUpperCase()}: ${timestamp}` : timestamp;
+    }
+  }
+
+  function fmtDowntime(value){
+    const number = Number.parseFloat(value ?? 0);
+    if (Number.isNaN(number)) return '0.0 mins';
+    return `${number.toFixed(1)} mins`;
+  }
+
+  function updateNavState(){
+    if (!prevBtn || !nextBtn) return;
+    if (slidesData.length <= 1) {
+      prevBtn.disabled = true;
+      nextBtn.disabled = true;
+    } else {
+      prevBtn.disabled = false;
+      nextBtn.disabled = false;
+    }
+  }
+
+  function fill(){
+    const slide = slidesData[idx];
+    if (!slide) return;
+
+    el('adStationName').textContent = slide.name || '—';
+    el('adShift').textContent = (slide.shift || '—').toString().toUpperCase();
+    el('adLocation').textContent = slide.device_label || '—';
+    el('adLastUpdated').textContent = fmtDateTime(slide.last_updated);
+    el('adPlan').textContent = Math.round(slide.plan ?? 0);
+    el('adActual').textContent = Math.round(slide.actual ?? 0);
+    el('adDowntime').textContent = fmtDowntime(slide.downtime_min);
+    el('adFault').textContent = fmtEvent(slide.calltype, slide.fault_time);
+    el('adResolved').textContent = fmtEvent(slide.calltype, slide.resolved_time);
+
+    const isRunning = Boolean(slide.is_active);
+    statusBar.classList.toggle('running', isRunning);
+    statusBar.classList.toggle('stopped', !isRunning);
+    statusIcon.textContent = isRunning ? '✔' : '⚠';
+    statusText.textContent = isRunning ? 'Running' : 'Stopped';
+
+    if (deviceLink) {
+      const isActiveDevice = slide.device_id === activeId;
+      deviceLink.textContent = isActiveDevice ? 'You are viewing this device' : 'Open Device Page';
+
+      if (isActiveDevice) {
+        deviceLink.href = '#';
+        deviceLink.classList.add('btn-secondary', 'disabled');
+        deviceLink.classList.remove('btn-outline-light');
+        deviceLink.setAttribute('aria-disabled', 'true');
+        deviceLink.setAttribute('tabindex', '-1');
+      } else {
+        const targetHref = slide.device_url || '#';
+        deviceLink.href = targetHref;
+        deviceLink.classList.remove('btn-secondary', 'disabled');
+        deviceLink.classList.add('btn-outline-light');
+        const isPlaceholder = targetHref === '#';
+        deviceLink.setAttribute('aria-disabled', isPlaceholder ? 'true' : 'false');
+        if (isPlaceholder) {
+          deviceLink.setAttribute('tabindex', '-1');
+        } else {
+          deviceLink.removeAttribute('tabindex');
+        }
+      }
+    }
+  }
+
+  updateNavState();
+  fill();
+
+  if (prevBtn) {
+    prevBtn.addEventListener('click', () => {
+      if (!slidesData.length) return;
+      idx = (idx - 1 + slidesData.length) % slidesData.length;
+      fill();
+    });
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      if (!slidesData.length) return;
+      idx = (idx + 1) % slidesData.length;
+      fill();
+    });
+  }
+})();
+</script>
 {% else %}
 <div class="alert alert-warning mb-4">
   <i class="fas fa-info-circle me-2"></i>
-  No matching Andon station was found for this device. Check that the device address matches the station IP.
+  No Andon snapshot data is available for this device.
 </div>
 {% endif %}

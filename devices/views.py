@@ -16,7 +16,9 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
         pass
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Min, Max, Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -26,6 +28,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from django.utils.dateparse import parse_datetime
 from urllib.parse import urlparse
+from django.core.mail import send_mail
 
 from accounts.models import User
 
@@ -37,6 +40,7 @@ from .models import (
     DeviceData,
     DeviceShare,
     DeviceProvisioningToken,
+    DeviceTokenAccessOTP,
 )
 from .tasks import poll_device_task
 
@@ -162,6 +166,8 @@ def _build_andon_snapshot(station: Station) -> dict:
         'downtime_min': (shift_entry.downtime_min if shift_entry else station.total_downtime_min),
         'fault_time': section_entry.fault_time if section_entry else None,
         'resolved_time': section_entry.resolved_time if section_entry else None,
+        'calltype': section_entry.calltype if section_entry else None,
+        'shift': shift_entry.shift if shift_entry else None,
         'ip': station.ip_address,
         'created_at': station.created_at,
         'last_updated': station.last_ping,
@@ -315,6 +321,7 @@ def device_list(request):
         .select_related('device_owner')
         .prefetch_related('device_shares__user')
         .distinct()
+        .order_by('-last_updated', '-created_at')
     )
     current_time = timezone.now()
     
@@ -402,6 +409,70 @@ def download_devices_csv(request):
 
 @login_required
 @require_POST
+def device_token_request_otp(request, device_id):
+    device = get_object_or_404(
+        Device.objects.prefetch_related('device_shares__user'), id=device_id
+    )
+    role = _get_device_role(device, request.user)
+    if role not in {
+        DeviceShare.AccessLevel.INSPECTOR,
+        DeviceShare.AccessLevel.MANAGER,
+    }:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+
+    email_candidates = [
+        getattr(request.user, 'shift_manager_email', '').strip(),
+        getattr(request.user, 'daily_manager_email', '').strip(),
+        (request.user.email or '').strip(),
+    ]
+    email = next((value for value in email_candidates if value), '')
+    if not email:
+        return JsonResponse({'error': 'No email configured for your account.'}, status=400)
+
+    try:
+        code, otp = DeviceTokenAccessOTP.issue(device, request.user)
+    except Exception:  # pragma: no cover - defensive guard
+        logger.exception(
+            'Failed to issue OTP for device_id=%s user_id=%s',
+            device.id,
+            request.user.id,
+        )
+        return JsonResponse({'error': 'Unable to generate OTP at this time.'}, status=500)
+
+    device_label = device.located_at or device.device_address or f'Device {device.id}'
+    greeting = request.user.get_short_name() or request.user.username or request.user.email
+    subject = 'OTP to view device token'
+    message = (
+        f"Hello {greeting},\n\n"
+        f"Use the one-time password below to reveal the device API token for {device_label}:\n\n"
+        f"{code}\n\n"
+        "This code expires in 2 minutes. If you did not request it, you can ignore this email.\n\n"
+        "Energy Meter Security"
+    )
+    from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@energymeter.local')
+
+    try:
+        send_mail(subject, message, from_email, [email], fail_silently=False)
+    except Exception:  # pragma: no cover - email backend failure
+        logger.exception(
+            'Failed to send OTP email for device_id=%s user_id=%s',
+            device.id,
+            request.user.id,
+        )
+        otp.delete()
+        return JsonResponse({'error': 'Failed to send OTP email.'}, status=502)
+
+    return JsonResponse(
+        {
+            'otp_id': otp.id,
+            'expires_at': otp.expires_at.isoformat(),
+            'message': 'OTP sent to your email. The code expires in 2 minutes.',
+        }
+    )
+
+
+@login_required
+@require_POST
 def device_config_detail(request, device_id):
     device = get_object_or_404(
         Device.objects.prefetch_related('device_shares__user'), id=device_id
@@ -449,11 +520,41 @@ def device_token_detail(request, device_id):
     }:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
 
-    password = (request.POST.get('password') or '').strip()
-    if not password:
-        return JsonResponse({'error': 'Password is required.'}, status=400)
-    if not request.user.check_password(password):
-        return JsonResponse({'error': 'Password verification failed.'}, status=403)
+    otp_id_raw = request.POST.get('otp_id')
+    otp_code = (request.POST.get('otp') or '').strip()
+    if not otp_id_raw or not otp_code:
+        return JsonResponse({'error': 'OTP code is required.'}, status=400)
+
+    try:
+        otp_id = int(otp_id_raw)
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid OTP identifier.'}, status=400)
+
+    with transaction.atomic():
+        try:
+            otp_obj = (
+                DeviceTokenAccessOTP.objects.select_for_update()
+                .get(id=otp_id, device=device, user=request.user)
+            )
+        except DeviceTokenAccessOTP.DoesNotExist:
+            return JsonResponse({'error': 'OTP not found. Request a new code.'}, status=404)
+
+        if otp_obj.verified_at:
+            return JsonResponse({'error': 'OTP already used. Request a new code.'}, status=400)
+
+        if otp_obj.is_expired():
+            return JsonResponse({'error': 'OTP expired. Request a new code.'}, status=400)
+
+        if not otp_obj.validate_code(otp_code):
+            otp_obj.register_failure()
+            if otp_obj.attempt_count >= otp_obj.MAX_ATTEMPTS:
+                return JsonResponse(
+                    {'error': 'Too many incorrect attempts. Request a new OTP.'},
+                    status=403,
+                )
+            return JsonResponse({'error': 'Incorrect OTP. Try again.'}, status=403)
+
+        otp_obj.mark_verified()
 
     token_value = device.device_secret
     if not token_value:
@@ -464,7 +565,6 @@ def device_token_detail(request, device_id):
 
     response_payload = {
         'token': str(token_value),
-        'encryption_key_b64': device.encryption_key_b64 or '',
         'updated_at': timezone.localtime(device.last_updated).isoformat()
         if device.last_updated
         else None,
@@ -507,10 +607,17 @@ def add_device(request):
                 with transaction.atomic():
                     device.save()
             except IntegrityError:
+                conflicting_device_id = (
+                    Device.objects.filter(
+                        device_owner=request.user,
+                        device_address=device.device_address,
+                    )
+                    .values_list('id', flat=True)
+                    .first()
+                )
                 logger.info(
-                    "Duplicate device registration prevented for user=%s address=%s",
-                    request.user.id,
-                    device.device_address,
+                    "Duplicate device registration prevented for device_id=%s",
+                    conflicting_device_id or '<unknown>',
                 )
                 form.add_error(
                     'device_address',
@@ -543,6 +650,10 @@ def device_detail(request, device_id):
     device = get_object_or_404(
         Device.objects.prefetch_related('device_shares__user'), id=device_id
     )
+
+    if device.device_type == 'gas_monitor' and hasattr(device, 'gas_monitor'):
+        return redirect('gas_monitor:device_detail', pk=device.gas_monitor.pk)
+
     is_owner = device.device_owner_id == request.user.id
 
     if device.provisioning_state != Device.ProvisioningState.ACTIVE and not is_owner:
@@ -571,17 +682,42 @@ def device_detail(request, device_id):
 
     current_time = timezone.now()
 
-    accessible_devices = (
+    accessible_devices = list(
         Device.objects.filter(
             Q(device_owner=request.user) | Q(shared_with=request.user),
             provisioning_state=Device.ProvisioningState.ACTIVE,
         )
         .prefetch_related('device_shares__user')
         .distinct()
-        .order_by('id')
+        .order_by('-last_updated', '-created_at')
     )
-    next_device = accessible_devices.filter(id__gt=device_id).order_by('id').first()
-    prev_device = accessible_devices.filter(id__lt=device_id).order_by('-id').first()
+
+    prev_device = next_device = None
+    for index, candidate in enumerate(accessible_devices):
+        if candidate.id != device.id:
+            continue
+        if index > 0:
+            prev_device = accessible_devices[index - 1]
+        if index + 1 < len(accessible_devices):
+            next_device = accessible_devices[index + 1]
+        break
+
+    andon_slides: list[dict] = []
+    for candidate in accessible_devices:
+        if candidate.device_type != 'andon':
+            continue
+        station_candidate = _find_andon_station(candidate)
+        if not station_candidate:
+            continue
+        snapshot = _build_andon_snapshot(station_candidate)
+        snapshot.update(
+            {
+                'device_id': candidate.id,
+                'device_label': candidate.located_at,
+                'device_url': reverse('devices:device_detail', args=[candidate.id]),
+            }
+        )
+        andon_slides.append(snapshot)
 
     if request.GET.get('poll') == 'true':
         if device.provisioning_state != Device.ProvisioningState.ACTIVE:
@@ -682,6 +818,8 @@ def device_detail(request, device_id):
             'can_manage_device': can_manage,
             'is_andon': is_andon,
             'andon_snapshot': andon_snapshot,
+            'andon_slides': andon_slides,
+            'active_andon_device_id': device.id,
             'config_url': reverse('devices:device_config_detail', args=[device.id]),
             'shared_entries': shared_entries,
         },
@@ -734,6 +872,8 @@ def device_provisioning(request, device_id):
         if session_expiry and session_device_id != device.id:
             request.session['provision_token_expiry'] = session_expiry
 
+    auto_station = _find_andon_station(device) if device.device_type == 'andon' else None
+
     if request.method == 'POST':
         action = request.POST.get('action', 'issue')
         if action == 'revoke':
@@ -760,39 +900,65 @@ def device_provisioning(request, device_id):
             lifetime = timedelta(minutes=minutes)
 
         notes = (request.POST.get('notes') or '').strip()
+        station_metadata = {}
+        if device.device_type == 'andon':
+            station_obj = _find_andon_station(device)
+            if station_obj:
+                station_metadata = {
+                    'andon_station_id': station_obj.id,
+                    'andon_station_name': station_obj.name,
+                    'andon_station_ip': station_obj.ip_address,
+                }
+
         metadata = {
             'notes': notes or None,
             'issued_from_ip': request.META.get('REMOTE_ADDR'),
             'channel': 'ui',
+            'device_address': device.device_address,
         }
+        metadata.update(station_metadata)
         token, token_obj = DeviceProvisioningToken.issue(
             device,
             created_by=request.user,
             lifetime=lifetime,
             metadata={k: v for k, v in metadata.items() if v},
         )
-        issued_token = token
-        if token_obj.expires_at:
-            issued_expires_at = timezone.localtime(token_obj.expires_at)
-        else:
-            issued_expires_at = None
         messages.success(request, 'Provisioning token generated successfully.')
+
+        request.session['provision_token_device'] = device.id
+        request.session['provision_token_value'] = token
+        request.session['provision_token_expiry'] = (
+            token_obj.expires_at.isoformat() if token_obj.expires_at else ''
+        )
+
+        return redirect('devices:device_provisioning', device_id=device.id)
 
     recent_queryset = device.provisioning_tokens.select_related('created_by').order_by('-created_at')[:10]
     now_value = timezone.now()
     recent_tokens = []
     for token in recent_queryset:
+        metadata = token.metadata or {}
         if token.used_at:
             status = 'claimed'
+        elif metadata.get('auto_expired'):
+            status = 'unclaimed'
         elif token.expires_at and token.expires_at <= now_value:
             status = 'expired'
         else:
             status = 'pending'
-        recent_tokens.append({'token': token, 'status': status})
+        recent_tokens.append({'token': token, 'status': status, 'metadata': metadata})
 
     claim_url = request.build_absolute_uri(reverse('api:device-claim'))
     ingest_url = request.build_absolute_uri(reverse('api:device-data-ingest'))
     token_detail_url = reverse('devices:device_token_detail', args=[device.id])
+    token_otp_url = reverse('devices:device_token_request_otp', args=[device.id])
+
+    otp_email_candidates = [
+        getattr(request.user, 'shift_manager_email', '').strip(),
+        getattr(request.user, 'daily_manager_email', '').strip(),
+        (request.user.email or '').strip(),
+    ]
+    otp_email = next((value for value in otp_email_candidates if value), '')
 
     context = {
         'device': device,
@@ -805,6 +971,9 @@ def device_provisioning(request, device_id):
         'claim_url': claim_url,
         'ingest_url': ingest_url,
         'token_detail_url': token_detail_url,
+        'token_otp_url': token_otp_url,
+        'otp_email': otp_email,
+        'auto_station': auto_station,
     }
     return render(request, 'devices/device_provision.html', context)
 

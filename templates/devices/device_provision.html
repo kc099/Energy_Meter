@@ -65,6 +65,23 @@
                             <label for="notes" class="form-label">Notes (optional)</label>
                             <textarea name="notes" id="notes" rows="2" class="form-control" placeholder="e.g., Provision for turbine room ESP32"></textarea>
                         </div>
+                        {% if device.device_type == 'andon' %}
+                        <div class="col-12">
+                            {% if auto_station %}
+                            <div class="alert alert-info mb-0">
+                                <i class="fas fa-sitemap me-1"></i>
+                                Tokens for this device auto-bind to <strong>{{ auto_station.name }}</strong> ({{ auto_station.ip_address }}).
+                                Ensure the station stays reachable for successful claims.
+                            </div>
+                            {% else %}
+                            <div class="alert alert-warning mb-0">
+                                <i class="fas fa-exclamation-triangle me-1"></i>
+                                No matching Andon station was found for the device address <code>{{ device.device_address }}</code>.
+                                Update either the device address or the station IP so provisioning succeeds.
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
                         <div class="col-12 d-grid">
                             <button type="submit" class="btn btn-primary">Generate Token</button>
                         </div>
@@ -103,17 +120,33 @@
         <div class="card-header bg-info text-white d-flex align-items-center justify-content-between">
             <h5 class="mb-0">Active Device Token</h5>
             {% if has_active_secret %}
-            <span class="badge bg-light text-dark">Visible after password</span>
+            <span class="badge bg-light text-dark">OTP verification required</span>
             {% endif %}
         </div>
         <div class="card-body">
             {% if has_active_secret %}
                 <p class="text-muted">Revealing the token lets you copy it for diagnostics. The value stays valid until you revoke it.</p>
-                <form id="reveal-token-form" class="row gy-2" data-token-url="{{ token_detail_url }}">
+                <form id="request-otp-form" class="row gy-2 align-items-end" data-otp-url="{{ token_otp_url }}">
                     {% csrf_token %}
+                    <div class="col-12 col-md-8">
+                        <label class="form-label">Step 1: Request OTP</label>
+                        <p class="form-text mb-0">A 6-digit code will be sent to {{ otp_email|default:'your email' }}.</p>
+                    </div>
+                    <div class="col-12 col-md-4 d-flex align-items-end gap-2">
+                        <button type="submit" class="btn btn-outline-primary flex-shrink-0">Send OTP</button>
+                        <div class="spinner-border text-primary ms-2 visually-hidden" role="status" id="request-otp-spinner">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </form>
+                <div id="otp-status" class="alert mt-3 d-none"></div>
+                <form id="reveal-token-form" class="row gy-2 mt-2" data-token-url="{{ token_detail_url }}">
+                    {% csrf_token %}
+                    <input type="hidden" name="otp_id" id="otp-id">
                     <div class="col-12 col-md-6">
-                        <label class="form-label" for="reveal_password">Account password</label>
-                        <input type="password" class="form-control" name="password" id="reveal_password" autocomplete="current-password" required>
+                        <label class="form-label" for="otp-code">Step 2: Enter OTP</label>
+                        <input type="text" class="form-control" name="otp" id="otp-code" maxlength="6" pattern="\d{6}" inputmode="numeric" autocomplete="one-time-code" placeholder="XXXXXX" required>
+                        <div class="form-text" id="otp-countdown">OTP expires 2 minutes after it is issued.</div>
                     </div>
                     <div class="col-12 col-md-6 d-flex align-items-end gap-2">
                         <button type="submit" class="btn btn-info text-white flex-shrink-0">Reveal Current Token</button>
@@ -126,8 +159,6 @@
                 <div id="token-display" class="mt-3 d-none">
                     <label class="form-label fw-semibold">Device Token</label>
                     <pre class="bg-dark text-white p-3 rounded small" id="token-value">Hidden</pre>
-                    <label class="form-label fw-semibold mt-3">AES Key (Base64)</label>
-                    <pre class="bg-light border rounded p-3 small" id="token-aes">Hidden</pre>
                     <p class="text-muted fst-italic mt-2 mb-0">Token remains active until revoked from this page.</p>
                 </div>
             {% else %}
@@ -149,6 +180,7 @@
                             <th>Issued</th>
                             <th>Expires</th>
                             <th>Status</th>
+                            {% if device.device_type == 'andon' %}<th>Station</th>{% endif %}
                             <th>Issued By</th>
                             <th>Notes</th>
                         </tr>
@@ -168,12 +200,23 @@
                             <td>
                                 {% if entry.status == 'claimed' %}
                                     <span class="badge bg-success">Claimed</span>
+                                {% elif entry.status == 'unclaimed' %}
+                                    <span class="badge bg-info text-dark">Unclaimed</span>
                                 {% elif entry.status == 'expired' %}
                                     <span class="badge bg-secondary">Expired</span>
                                 {% else %}
                                     <span class="badge bg-warning text-dark">Pending</span>
                                 {% endif %}
                             </td>
+                            {% if device.device_type == 'andon' %}
+                            <td>
+                                {% if token.metadata.andon_station_name %}
+                                    {{ token.metadata.andon_station_name }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            {% endif %}
                             <td>{% if token.created_by %}{{ token.created_by.username }}{% else %}<em>System</em>{% endif %}</td>
                             <td>
                                 {% if token.metadata.notes %}
@@ -214,32 +257,159 @@
 {{ block.super }}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const form = document.getElementById('reveal-token-form');
-    if (!form) {
+    const requestForm = document.getElementById('request-otp-form');
+    const revealForm = document.getElementById('reveal-token-form');
+    if (!requestForm || !revealForm) {
         return;
     }
 
-    const spinner = document.getElementById('reveal-token-spinner');
+    const requestSpinner = document.getElementById('request-otp-spinner');
+    const revealSpinner = document.getElementById('reveal-token-spinner');
+    const otpStatus = document.getElementById('otp-status');
     const alertBox = document.getElementById('token-alert');
     const display = document.getElementById('token-display');
     const tokenValue = document.getElementById('token-value');
-    const aesValue = document.getElementById('token-aes');
-    const url = form.dataset.tokenUrl;
+    const otpInput = document.getElementById('otp-code');
+    const otpIdInput = document.getElementById('otp-id');
+    const countdownEl = document.getElementById('otp-countdown');
+    let countdownTimer = null;
 
-    form.addEventListener('submit', function (event) {
+    function resetAlert(box, isOtpStatus) {
+        if (!box) {
+            return;
+        }
+        box.classList.add('d-none');
+        box.textContent = '';
+        if (isOtpStatus) {
+            box.className = 'alert mt-3';
+        }
+    }
+
+    function showOtpStatus(message, level) {
+        if (!otpStatus) {
+            return;
+        }
+        otpStatus.textContent = message;
+        otpStatus.className = 'alert mt-3 alert-' + level;
+        otpStatus.classList.remove('d-none');
+    }
+
+    function clearCountdown(message) {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+        if (countdownEl) {
+            countdownEl.textContent = message || 'OTP expires 2 minutes after it is issued.';
+        }
+    }
+
+    function startCountdown(expiresAtIso) {
+        if (!countdownEl) {
+            return;
+        }
+        clearCountdown();
+        if (!expiresAtIso) {
+            return;
+        }
+
+        const expiresAt = new Date(expiresAtIso);
+        if (Number.isNaN(expiresAt.getTime())) {
+            return;
+        }
+
+        function tick() {
+            const now = new Date();
+            const diffMs = expiresAt - now;
+            if (diffMs <= 0) {
+                clearCountdown('OTP expired. Request a new code.');
+                return;
+            }
+            const totalSeconds = Math.floor(diffMs / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            countdownEl.textContent = `Expires in ${minutes}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        tick();
+        countdownTimer = setInterval(tick, 1000);
+    }
+
+    requestForm.addEventListener('submit', function (event) {
         event.preventDefault();
-        alertBox.classList.add('d-none');
+        resetAlert(alertBox, false);
         display.classList.add('d-none');
-        spinner.classList.remove('visually-hidden');
+        const url = requestForm.dataset.otpUrl;
+        if (!url) {
+            return;
+        }
 
-        const formData = new FormData(form);
+        if (requestSpinner) {
+            requestSpinner.classList.remove('visually-hidden');
+        }
+        const formData = new FormData(requestForm);
 
         fetch(url, {
             method: 'POST',
             headers: {
-                'X-Requested-With': 'XMLHttpRequest'
+                'X-Requested-With': 'XMLHttpRequest',
             },
             body: formData,
+        })
+            .then(function (response) {
+                if (!response.ok) {
+                    return response.json().then(function (data) {
+                        const message = data && data.error ? data.error : 'Unable to send OTP.';
+                        throw new Error(message);
+                    });
+                }
+                return response.json();
+            })
+            .then(function (data) {
+                if (otpIdInput) {
+                    otpIdInput.value = data.otp_id;
+                }
+                if (otpInput) {
+                    otpInput.value = '';
+                    otpInput.focus();
+                }
+                startCountdown(data.expires_at);
+                showOtpStatus(data.message || 'OTP sent.', 'success');
+            })
+            .catch(function (error) {
+                clearCountdown();
+                showOtpStatus(error.message, 'danger');
+            })
+            .finally(function () {
+                if (requestSpinner) {
+                    requestSpinner.classList.add('visually-hidden');
+                }
+            });
+    });
+
+    revealForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        resetAlert(alertBox, false);
+        display.classList.add('d-none');
+        const url = revealForm.dataset.tokenUrl;
+        if (!url) {
+            return;
+        }
+        if (!otpIdInput || !otpIdInput.value) {
+            showOtpStatus('Request an OTP before revealing the token.', 'warning');
+            return;
+        }
+
+        if (revealSpinner) {
+            revealSpinner.classList.remove('visually-hidden');
+        }
+
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: new FormData(revealForm),
         })
             .then(function (response) {
                 if (!response.ok) {
@@ -252,16 +422,26 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .then(function (data) {
                 tokenValue.textContent = data.token || 'Unavailable';
-                aesValue.textContent = data.encryption_key_b64 || '—';
                 display.classList.remove('d-none');
+                clearCountdown('OTP used. Request a new code to view again.');
+                resetAlert(otpStatus, true);
+                if (otpIdInput) {
+                    otpIdInput.value = '';
+                }
             })
             .catch(function (error) {
-                alertBox.textContent = error.message;
-                alertBox.classList.remove('d-none');
+                if (alertBox) {
+                    alertBox.textContent = error.message;
+                    alertBox.classList.remove('d-none');
+                }
             })
             .finally(function () {
-                spinner.classList.add('visually-hidden');
-                form.reset();
+                if (revealSpinner) {
+                    revealSpinner.classList.add('visually-hidden');
+                }
+                if (otpInput) {
+                    otpInput.value = '';
+                }
             });
     });
 });

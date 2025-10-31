@@ -9,6 +9,6 @@ urlpatterns = [
 
     path("stations/add/", views.station_add, name="station_add"),
     path("stations/<int:pk>/edit/", views.station_edit, name="station_edit"),
-    path("stations/<int:pk>/delete/", views.station_delete, name="station_delete"), 
-
+    path("stations/<int:pk>/delete/", views.station_delete, name="station_delete"),
+    path("api/stations/<int:pk>/telemetry/", views.telemetry_ingest_view, name="telemetry_ingest"),
 ]

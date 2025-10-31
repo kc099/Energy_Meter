@@ -60,32 +60,60 @@
                             <div class="card mb-3">
                                 <div class="card-body p-3">
                                     <h6 class="text-muted mb-3">Latest Readings</h6>
-                                    <div class="row g-2">
-                                        <div class="col-6">
-                                            <div class="p-2 border rounded">
-                                                <small class="text-muted d-block">Voltage</small>
-                                                <strong>{{ device.latest_value.voltage|floatformat:1 }} V</strong>
+                                    {% if device.device_type == 'gas_monitor' %}
+                                        <div class="p-2 border rounded">
+                                            <small class="text-muted d-block">Gas level</small>
+                                            <strong>{{ device.latest_value.gas_level|default:"—" }} {{ device.latest_value.unit|default:'ppm' }}</strong>
+                                        </div>
+                                    {% elif device.device_type == 'andon' %}
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Actual</small>
+                                                    <strong>{{ device.latest_value.actual|default:"—" }}</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Plan</small>
+                                                    <strong>{{ device.latest_value.plan|default:"—" }}</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-12">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Downtime</small>
+                                                    <strong>{{ device.latest_value.downtime_min|default:"—" }} min</strong>
+                                                </div>
                                             </div>
                                         </div>
-                                        <div class="col-6">
-                                            <div class="p-2 border rounded">
-                                                <small class="text-muted d-block">Current</small>
-                                                <strong>{{ device.latest_value.current|floatformat:2 }} A</strong>
+                                    {% else %}
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Voltage</small>
+                                                    <strong>{{ device.latest_value.voltage|floatformat:1 }} V</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Current</small>
+                                                    <strong>{{ device.latest_value.current|floatformat:2 }} A</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">Power Factor</small>
+                                                    <strong>{{ device.latest_value.power_factor|floatformat:3 }}</strong>
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="p-2 border rounded">
+                                                    <small class="text-muted d-block">kWh</small>
+                                                    <strong>{{ device.latest_value.kwh|floatformat:1 }}</strong>
+                                                </div>
                                             </div>
                                         </div>
-                                        <div class="col-6">
-                                            <div class="p-2 border rounded">
-                                                <small class="text-muted d-block">Power Factor</small>
-                                                <strong>{{ device.latest_value.power_factor|floatformat:3 }}</strong>
-                                            </div>
-                                        </div>
-                                        <div class="col-6">
-                                            <div class="p-2 border rounded">
-                                                <small class="text-muted d-block">kWh</small>
-                                                <strong>{{ device.latest_value.kwh|floatformat:1 }}</strong>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         {% endif %}
